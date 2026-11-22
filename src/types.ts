@@ -53,6 +53,8 @@ export interface OrderReservation {
   createdAt: string;
   customerName: string;
   contact: string;
+  addressLine1?: string;
+  addressLine2?: string;
   city: string;
   postalCode: string;
   address: string;
@@ -60,6 +62,8 @@ export interface OrderReservation {
   items: CartReservationItem[];
   totalInr: number;
   status: OrderStatus;
+  isTestOrder?: boolean;
+  emailDelivered?: boolean;
 }
 
 export interface UpcomingReleaseSlot {

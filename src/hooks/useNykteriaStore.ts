@@ -16,9 +16,11 @@ function buildInitialTestOrder(): OrderReservation {
     createdAt: new Date().toISOString(),
     customerName: 'Test Order — Aarav Mehta',
     contact: 'nykteriacloths@gmail.com',
+    addressLine1: 'Suite 4B, Kala Ghoda Atelier Lane',
+    addressLine2: 'Fort Heritage Precinct, Ground Floor',
     city: 'Mumbai',
     postalCode: '400001',
-    address: 'Suite 4B, Kala Ghoda Atelier Lane, Fort',
+    address: 'Suite 4B, Kala Ghoda Atelier Lane, Fort Heritage Precinct, Ground Floor',
     notes: 'Sample test allocation for verifying stage progression & tracking.',
     items: [
       {
@@ -35,6 +37,7 @@ function buildInitialTestOrder(): OrderReservation {
     ],
     totalInr: pricing.finalPrice,
     status: 'Preparing Allocation',
+    isTestOrder: true,
   };
 }
 
@@ -170,12 +173,14 @@ export function useNykteriaStore() {
     const testOrder: OrderReservation = {
       orderId: `NYK-${randomCode}`,
       createdAt: new Date().toISOString(),
-      customerName: 'Test Order — Verification Sample',
-      contact: 'nykteriacloths@gmail.com',
+      customerName: 'Test Order — NYKTERIA Verification',
+      contact: '+91 98200 00000 / nykteriacloths@gmail.com',
+      addressLine1: 'Studio Allocation Bay 04, Kala Ghoda',
+      addressLine2: 'Fort Heritage Wing, Ground Floor',
       city: 'Mumbai',
       postalCode: '400001',
-      address: 'Studio Allocation Bay 04, Fort',
-      notes: 'Generated live test order for verification.',
+      address: 'Studio Allocation Bay 04, Kala Ghoda, Fort Heritage Wing, Ground Floor',
+      notes: 'Automated verification test order.',
       items: [
         {
           productId: targetProduct.id,
@@ -191,6 +196,7 @@ export function useNykteriaStore() {
       ],
       totalInr: pricing.finalPrice,
       status: 'Confirmed Reservation',
+      isTestOrder: true,
     };
     setOrders((prev) => [testOrder, ...prev]);
     return testOrder;
@@ -199,6 +205,12 @@ export function useNykteriaStore() {
   const updateOrderStatus = useCallback((orderId: string, status: OrderStatus) => {
     setOrders((prev) =>
       prev.map((order) => (order.orderId === orderId ? { ...order, status } : order))
+    );
+  }, []);
+
+  const updateOrderEmailStatus = useCallback((orderId: string, emailDelivered: boolean) => {
+    setOrders((prev) =>
+      prev.map((order) => (order.orderId === orderId ? { ...order, emailDelivered } : order))
     );
   }, []);
 
@@ -214,5 +226,6 @@ export function useNykteriaStore() {
     addOrderReservation,
     createTestOrder,
     updateOrderStatus,
+    updateOrderEmailStatus,
   };
 }

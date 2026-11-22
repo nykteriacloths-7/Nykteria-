@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Lock, Plus, RotateCcw, Trash2, Upload, Check, KeyRound, FlaskConical } from 'lucide-react';
 import { GarmentSize, OrderReservation, OrderStatus, Product } from '../types';
 import { formatInr, getEffectivePrice } from '../utils/pricing';
+import { sendOrderEmailViaFormSubmit, STORE_OWNER_EMAIL } from '../utils/orderEmail';
 import { ResilientGarmentImage } from './ResilientGarmentImage';
 import { triggerHaptic } from '../utils/haptics';
 
@@ -12,6 +13,7 @@ interface OwnerAdminPanelProps {
   onAddProduct: (product: Product) => void;
   onRemoveProduct: (productId: string) => void;
   onUpdateOrderStatus: (orderId: string, status: OrderStatus) => void;
+  onUpdateOrderEmailStatus: (orderId: string, emailDelivered: boolean) => void;
   onCreateTestOrder: () => OrderReservation;
   onResetDefaults: () => void;
   onClosePanel: () => void;
@@ -27,6 +29,21 @@ const ORDER_STATUS_OPTIONS: OrderStatus[] = [
   'Dispatched',
 ];
 
+const OWNER_EMAIL = (import.meta.env.VITE_OWNER_ADMIN_EMAIL || STORE_OWNER_EMAIL)
+  .trim()
+  .toLowerCase();
+const DEFAULT_OWNER_PASSWORD = import.meta.env.VITE_OWNER_ADMIN_PASSWORD || 'Nykteria@2026';
+const PASSWORD_OVERRIDE_KEY = 'nykteria_owner_password_v1';
+
+function getActiveOwnerPassword(): string {
+  try {
+    const custom = window.localStorage.getItem(PASSWORD_OVERRIDE_KEY);
+    return custom && custom.length >= 6 ? custom : DEFAULT_OWNER_PASSWORD;
+  } catch {
+    return DEFAULT_OWNER_PASSWORD;
+  }
+}
+
 export function OwnerAdminPanel({
   products,
   orders,
@@ -34,19 +51,14 @@ export function OwnerAdminPanel({
   onAddProduct,
   onRemoveProduct,
   onUpdateOrderStatus,
+  onUpdateOrderEmailStatus,
   onCreateTestOrder,
   onResetDefaults,
   onClosePanel,
 }: OwnerAdminPanelProps) {
-  const [authMode, setAuthMode] = useState<'loading' | 'claim' | 'login'>('loading');
-  const [authToken, setAuthToken] = useState<string | null>(null);
-  const [authenticatedEmail, setAuthenticatedEmail] = useState('');
-  const [envManaged, setEnvManaged] = useState(false);
-
+  const [unlocked, setUnlocked] = useState(false);
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
-  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
-  const [authSubmitting, setAuthSubmitting] = useState(false);
   const [authError, setAuthError] = useState('');
 
   const [showChangePassword, setShowChangePassword] = useState(false);
@@ -56,6 +68,7 @@ export function OwnerAdminPanel({
 
   const [activeTab, setActiveTab] = useState<AdminTab>('edit');
   const [statusNotice, setStatusNotice] = useState('');
+  const [sendingTestOrder, setSendingTestOrder] = useState(false);
 
   // New Product Form State
   const [newName, setNewName] = useState('');
@@ -75,145 +88,85 @@ export function OwnerAdminPanel({
     XL: true,
   });
 
-  const unlocked = Boolean(authToken);
-
   const showFlash = (msg: string) => {
     setStatusNotice(msg);
-    window.setTimeout(() => setStatusNotice(''), 2600);
+    window.setTimeout(() => setStatusNotice(''), 3400);
   };
 
-  useEffect(() => {
-    let active = true;
-    fetch('/api/admin/status')
-      .then((res) => res.json())
-      .then((data) => {
-        if (!active) return;
-        setEnvManaged(Boolean(data.envManaged));
-        setAuthMode(data.isConfigured ? 'login' : 'claim');
-      })
-      .catch(() => {
-        if (!active) return;
-        setAuthMode('login');
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const handleAuthSubmit = async (e: React.FormEvent) => {
+  const handleAuthSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmedEmail = emailInput.trim();
+    const trimmedEmail = emailInput.trim().toLowerCase();
+
     if (!trimmedEmail || !passwordInput) {
       triggerHaptic('error');
-      setAuthError('Enter your registered owner email and password.');
+      setAuthError('Enter your owner email and password.');
       return;
     }
 
-    if (authMode === 'claim') {
-      if (passwordInput.length < 6) {
-        triggerHaptic('error');
-        setAuthError('Create a password with at least 6 characters.');
-        return;
-      }
-      if (passwordInput !== confirmPasswordInput) {
-        triggerHaptic('error');
-        setAuthError('Passwords do not match.');
-        return;
-      }
-    }
-
-    setAuthSubmitting(true);
-    setAuthError('');
-    try {
-      const endpoint = authMode === 'claim' ? '/api/admin/claim' : '/api/admin/login';
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: trimmedEmail,
-          password: passwordInput,
-        }),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        triggerHaptic('error');
-        if (data.needsSetup) {
-          setAuthMode('claim');
-        }
-        setAuthError(data.error || 'Authentication failed.');
-        return;
-      }
-
-      triggerHaptic('lock');
-      setAuthToken(data.token);
-      setAuthenticatedEmail(data.ownerEmail || trimmedEmail.toLowerCase());
-      setEnvManaged(Boolean(data.envManaged));
-      setPasswordInput('');
-      setConfirmPasswordInput('');
-      setAuthError('');
-    } catch {
+    if (trimmedEmail !== OWNER_EMAIL) {
       triggerHaptic('error');
-      setAuthError('Unable to reach server authentication service.');
-    } finally {
-      setAuthSubmitting(false);
+      setAuthError(`Invalid owner email. Access is restricted to ${OWNER_EMAIL}.`);
+      return;
     }
+
+    if (passwordInput !== getActiveOwnerPassword()) {
+      triggerHaptic('error');
+      setAuthError('Incorrect owner password.');
+      return;
+    }
+
+    triggerHaptic('lock');
+    setUnlocked(true);
+    setPasswordInput('');
+    setAuthError('');
   };
 
-  const handleLockAdmin = async () => {
+  const handleLockAdmin = () => {
     triggerHaptic('lock');
-    if (authToken) {
-      try {
-        await fetch('/api/admin/logout', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${authToken}` },
-        });
-      } catch {
-        // Proceed clearing client memory token regardless
-      }
-    }
-    setAuthToken(null);
-    setAuthenticatedEmail('');
+    setUnlocked(false);
     setPasswordInput('');
-    setConfirmPasswordInput('');
     setAuthError('');
     setShowChangePassword(false);
   };
 
-  const handleChangePassword = async (e: React.FormEvent) => {
+  const handleChangePassword = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!authToken) return;
+    if (currentPwInput !== getActiveOwnerPassword()) {
+      triggerHaptic('error');
+      setPwChangeMessage('Current password is incorrect.');
+      return;
+    }
     if (newPwInput.length < 6) {
+      triggerHaptic('error');
       setPwChangeMessage('New password must be at least 6 characters.');
       return;
     }
     try {
-      const res = await fetch('/api/admin/change-password', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({
-          currentPassword: currentPwInput,
-          newPassword: newPwInput,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        triggerHaptic('error');
-        setPwChangeMessage(data.error || 'Unable to update password.');
-        return;
-      }
-      triggerHaptic('select');
-      setCurrentPwInput('');
-      setNewPwInput('');
-      setPwChangeMessage('');
-      setShowChangePassword(false);
-      showFlash('Owner password updated.');
+      window.localStorage.setItem(PASSWORD_OVERRIDE_KEY, newPwInput);
     } catch {
-      setPwChangeMessage('Unable to update password.');
+      // Ignore storage quota errors
     }
+    triggerHaptic('select');
+    setCurrentPwInput('');
+    setNewPwInput('');
+    setPwChangeMessage('');
+    setShowChangePassword(false);
+    showFlash('Owner password updated for this storefront.');
+  };
+
+  const handleSendAdminTestOrder = async () => {
+    if (sendingTestOrder) return;
+    setSendingTestOrder(true);
+    const created = onCreateTestOrder();
+    triggerHaptic('confirmOrder');
+    const result = await sendOrderEmailViaFormSubmit(created);
+    onUpdateOrderEmailStatus(created.orderId, result.delivered);
+    setSendingTestOrder(false);
+    showFlash(
+      result.delivered
+        ? `Test order #${created.orderId} saved & emailed to ${STORE_OWNER_EMAIL}.`
+        : `Test order #${created.orderId} saved locally (${result.message})`
+    );
   };
 
   const handleImageFileUpload = (
@@ -320,101 +273,59 @@ export function OwnerAdminPanel({
         <div className="py-8 sm:py-10 max-w-md">
           <div className="flex items-center gap-2.5 text-sm text-[#F3F2F0] mb-2">
             <Lock className="w-4 h-4 text-[#8B7CA8]" />
-            <span>
-              {authMode === 'claim'
-                ? 'Initialize Owner Email & Password'
-                : 'Owner Email & Password Required'}
-            </span>
+            <span>Owner Email & Password Required</span>
           </div>
           <p className="text-xs text-[#A1A1AA] mb-5 leading-relaxed">
-            {authMode === 'claim'
-              ? 'First-time storefront setup: verify your fixed NYKTERIA owner email and create your admin password to lock access.'
-              : 'Restricted storefront console bound to the registered NYKTERIA owner email for pricing, discounts, and order management.'}
+            Restricted storefront console bound to your registered NYKTERIA owner email for
+            modifying active garment prices, launch offers, and reviewing orders.
           </p>
 
-          {authMode === 'loading' ? (
-            <p className="text-xs font-mono-num uppercase tracking-[0.12em] text-[#A1A1AA]">
-              Checking owner access status...
-            </p>
-          ) : (
-            <form onSubmit={handleAuthSubmit} className="space-y-3">
-              <div>
-                <label htmlFor="nyx-owner-email" className="block text-xs text-[#A1A1AA] mb-1">
-                  Owner Email
-                </label>
-                <input
-                  id="nyx-owner-email"
-                  type="email"
-                  required
-                  value={emailInput}
-                  onChange={(e) => {
-                    setEmailInput(e.target.value);
-                    if (authError) setAuthError('');
-                  }}
-                  placeholder="Enter registered owner email"
-                  autoComplete="email"
-                  className="w-full bg-[#15151d] border border-[#F3F2F0]/15 px-3.5 py-2.5 text-sm text-[#F3F2F0] placeholder:text-[#71717A] focus:outline-none focus:border-[#8B7CA8] min-h-[44px]"
-                />
-              </div>
+          <form onSubmit={handleAuthSubmit} className="space-y-3">
+            <div>
+              <label htmlFor="nyx-owner-email" className="block text-xs text-[#A1A1AA] mb-1">
+                Owner Email
+              </label>
+              <input
+                id="nyx-owner-email"
+                type="email"
+                required
+                value={emailInput}
+                onChange={(e) => {
+                  setEmailInput(e.target.value);
+                  if (authError) setAuthError('');
+                }}
+                placeholder="Enter registered owner email"
+                autoComplete="email"
+                className="w-full bg-[#15151d] border border-[#F3F2F0]/15 px-3.5 py-2.5 text-sm text-[#F3F2F0] placeholder:text-[#71717A] focus:outline-none focus:border-[#8B7CA8] min-h-[44px]"
+              />
+            </div>
 
-              <div>
-                <label htmlFor="nyx-owner-password" className="block text-xs text-[#A1A1AA] mb-1">
-                  {authMode === 'claim' ? 'Create Admin Password' : 'Password'}
-                </label>
-                <input
-                  id="nyx-owner-password"
-                  type="password"
-                  required
-                  value={passwordInput}
-                  onChange={(e) => {
-                    setPasswordInput(e.target.value);
-                    if (authError) setAuthError('');
-                  }}
-                  placeholder={
-                    authMode === 'claim' ? 'Minimum 6 characters' : 'Enter owner password'
-                  }
-                  autoComplete={authMode === 'claim' ? 'new-password' : 'current-password'}
-                  className="w-full bg-[#15151d] border border-[#F3F2F0]/15 px-3.5 py-2.5 text-sm text-[#F3F2F0] placeholder:text-[#71717A] focus:outline-none focus:border-[#8B7CA8] min-h-[44px]"
-                />
-              </div>
+            <div>
+              <label htmlFor="nyx-owner-password" className="block text-xs text-[#A1A1AA] mb-1">
+                Password
+              </label>
+              <input
+                id="nyx-owner-password"
+                type="password"
+                required
+                value={passwordInput}
+                onChange={(e) => {
+                  setPasswordInput(e.target.value);
+                  if (authError) setAuthError('');
+                }}
+                placeholder="Enter owner password"
+                autoComplete="current-password"
+                className="w-full bg-[#15151d] border border-[#F3F2F0]/15 px-3.5 py-2.5 text-sm text-[#F3F2F0] placeholder:text-[#71717A] focus:outline-none focus:border-[#8B7CA8] min-h-[44px]"
+              />
+            </div>
 
-              {authMode === 'claim' && (
-                <div>
-                  <label
-                    htmlFor="nyx-owner-confirm-password"
-                    className="block text-xs text-[#A1A1AA] mb-1"
-                  >
-                    Confirm Password
-                  </label>
-                  <input
-                    id="nyx-owner-confirm-password"
-                    type="password"
-                    required
-                    value={confirmPasswordInput}
-                    onChange={(e) => {
-                      setConfirmPasswordInput(e.target.value);
-                      if (authError) setAuthError('');
-                    }}
-                    placeholder="Re-enter password"
-                    autoComplete="new-password"
-                    className="w-full bg-[#15151d] border border-[#F3F2F0]/15 px-3.5 py-2.5 text-sm text-[#F3F2F0] placeholder:text-[#71717A] focus:outline-none focus:border-[#8B7CA8] min-h-[44px]"
-                  />
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={authSubmitting}
-                className="px-5 py-2.5 bg-[#F3F2F0] text-[#0b0b10] hover:bg-[#E4E2DE] disabled:opacity-60 text-xs font-semibold tracking-[0.12em] uppercase cursor-pointer min-h-[44px] transition-colors"
-              >
-                {authSubmitting
-                  ? 'Verifying...'
-                  : authMode === 'claim'
-                  ? 'Set Password & Unlock'
-                  : 'Sign In & Unlock'}
-              </button>
-            </form>
-          )}
+            <button
+              type="submit"
+              className="px-5 py-2.5 bg-[#F3F2F0] text-[#0b0b10] hover:bg-[#E4E2DE] text-xs font-semibold tracking-[0.12em] uppercase cursor-pointer min-h-[44px] transition-colors"
+            >
+              Sign In & Unlock
+            </button>
+          </form>
           {authError && <p className="mt-3 text-xs text-red-400">{authError}</p>}
         </div>
       ) : (
@@ -424,24 +335,22 @@ export function OwnerAdminPanel({
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[#8B7CA8] uppercase tracking-[0.12em]">Verified Owner</span>
               <span aria-hidden="true">·</span>
-              <span className="font-mono-num text-[#F3F2F0]">{authenticatedEmail}</span>
+              <span className="font-mono-num text-[#F3F2F0]">{OWNER_EMAIL}</span>
             </div>
-            {!envManaged && (
-              <button
-                type="button"
-                onClick={() => {
-                  setShowChangePassword((prev) => !prev);
-                  setPwChangeMessage('');
-                }}
-                className="inline-flex items-center gap-1.5 text-xs text-[#A796C9] hover:text-[#F3F2F0] cursor-pointer"
-              >
-                <KeyRound className="w-3.5 h-3.5" />
-                <span>{showChangePassword ? 'Cancel Password Edit' : 'Change Password'}</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                setShowChangePassword((prev) => !prev);
+                setPwChangeMessage('');
+              }}
+              className="inline-flex items-center gap-1.5 text-xs text-[#A796C9] hover:text-[#F3F2F0] cursor-pointer"
+            >
+              <KeyRound className="w-3.5 h-3.5" />
+              <span>{showChangePassword ? 'Cancel Password Edit' : 'Change Password'}</span>
+            </button>
           </div>
 
-          {showChangePassword && !envManaged && (
+          {showChangePassword && (
             <form
               onSubmit={handleChangePassword}
               className="border border-[#F3F2F0]/10 bg-[#15151d] p-4 grid grid-cols-1 sm:grid-cols-3 gap-3 items-end"
@@ -925,15 +834,12 @@ export function OwnerAdminPanel({
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    const created = onCreateTestOrder();
-                    triggerHaptic('confirmOrder');
-                    showFlash(`Test order #${created.orderId} created.`);
-                  }}
-                  className="inline-flex items-center gap-2 px-4 py-2 border border-[#8B7CA8]/60 bg-[#0f0f15] hover:border-[#A796C9] text-xs font-medium uppercase tracking-[0.1em] text-[#F3F2F0] whitespace-nowrap shrink-0 min-h-[40px] cursor-pointer"
+                  disabled={sendingTestOrder}
+                  onClick={handleSendAdminTestOrder}
+                  className="inline-flex items-center gap-2 px-4 py-2 border border-[#8B7CA8]/60 bg-[#0f0f15] hover:border-[#A796C9] disabled:opacity-60 text-xs font-medium uppercase tracking-[0.1em] text-[#F3F2F0] whitespace-nowrap shrink-0 min-h-[40px] cursor-pointer"
                 >
                   <FlaskConical className="w-3.5 h-3.5 text-[#A796C9]" />
-                  <span>Run Test Order</span>
+                  <span>{sendingTestOrder ? 'Sending...' : 'Send Test Order'}</span>
                 </button>
               </div>
 
@@ -949,14 +855,19 @@ export function OwnerAdminPanel({
                         <div>
                           <p className="font-mono-num text-xs text-[#A796C9]">
                             #{order.orderId} · {order.status}
+                            {order.emailDelivered ? ' · Email Sent' : ''}
                           </p>
                           <p className="text-sm font-medium text-[#F3F2F0] mt-0.5">
                             {order.customerName} ({order.city})
                           </p>
                           <p className="text-xs text-[#A1A1AA] mt-0.5">
                             {order.items
-                              .map((i) => `${i.productName} [${i.size} × ${i.quantity}]`)
+                              .map((i) => `${i.productName} [Size ${i.size} × ${i.quantity}]`)
                               .join(', ')}
+                          </p>
+                          <p className="text-[11px] text-[#71717A] mt-0.5">
+                            {order.addressLine1 || order.address}
+                            {order.addressLine2 ? `, ${order.addressLine2}` : ''}
                           </p>
                         </div>
                         <span className="font-mono-num text-sm font-semibold text-[#F3F2F0]">

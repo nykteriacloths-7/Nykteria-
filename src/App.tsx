@@ -33,6 +33,7 @@ export default function App() {
     addOrderReservation,
     createTestOrder,
     updateOrderStatus,
+    updateOrderEmailStatus,
   } = useNykteriaStore();
 
   const [selectedProductId, setSelectedProductId] = useState<string>(() => {
@@ -141,6 +142,27 @@ export default function App() {
     );
   };
 
+  const handleChangeItemSize = (
+    productId: string,
+    currentSize: GarmentSize,
+    nextSize: GarmentSize
+  ) => {
+    if (currentSize === nextSize) return;
+    setBagSelections((prev) => {
+      const source = prev.find((e) => e.productId === productId && e.size === currentSize);
+      if (!source) return prev;
+      const existingTarget = prev.find((e) => e.productId === productId && e.size === nextSize);
+      return prev
+        .filter((e) => !(e.productId === productId && e.size === currentSize))
+        .map((e) =>
+          existingTarget && e.productId === productId && e.size === nextSize
+            ? { ...e, quantity: Math.min(10, e.quantity + source.quantity) }
+            : e
+        )
+        .concat(existingTarget ? [] : [{ productId, size: nextSize, quantity: source.quantity }]);
+    });
+  };
+
   const handleDismissToast = useCallback(() => {
     setToast(null);
   }, []);
@@ -207,6 +229,7 @@ export default function App() {
           onAddProduct={addProduct}
           onRemoveProduct={removeProduct}
           onUpdateOrderStatus={updateOrderStatus}
+          onUpdateOrderEmailStatus={updateOrderEmailStatus}
           onCreateTestOrder={createTestOrder}
           onOpenOrderStatus={() => handleOpenOrderStatus()}
           onResetDefaults={resetProductsToDefault}
@@ -227,10 +250,13 @@ export default function App() {
         reducedMotion={reducedMotion}
         onClose={() => setDrawerOpen(false)}
         items={bagItems}
+        products={products}
         onUpdateQuantity={handleUpdateQuantity}
+        onChangeItemSize={handleChangeItemSize}
         onRemoveItem={handleRemoveItem}
         onClearBag={() => setBagSelections([])}
         onSubmitReservation={addOrderReservation}
+        onUpdateOrderEmailStatus={updateOrderEmailStatus}
         onTrackOrder={(orderId) => handleOpenOrderStatus(orderId)}
       />
 
