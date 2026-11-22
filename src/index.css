@@ -1,0 +1,265 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --nyx-bg: #070709;
+    --nyx-surface: #101014;
+    --nyx-surface-elevated: #15151b;
+    --nyx-bone: #f3f2f0;
+    --nyx-ash: #a1a1aa;
+    --nyx-violet: #8b7ca8;
+    --nyx-violet-bright: #a796c9;
+    --nyx-hairline: rgba(243, 242, 240, 0.08);
+    --nyx-hairline-strong: rgba(243, 242, 240, 0.16);
+  }
+
+  html {
+    background-color: var(--nyx-bg);
+    color: var(--nyx-bone);
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    scroll-behavior: smooth;
+    scroll-snap-type: y proximity;
+    scroll-padding-top: 4rem;
+  }
+
+  body {
+    background-color: var(--nyx-bg);
+    color: var(--nyx-bone);
+    overflow-x: hidden;
+  }
+}
+
+.font-display {
+  font-family: 'Cinzel', Georgia, serif;
+}
+
+.font-sans-body {
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.font-mono-num {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Subtle matte editorial film grain */
+.nyx-grain-overlay {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.35'/%3E%3C/svg%3E");
+  opacity: 0.03;
+  pointer-events: none;
+}
+
+/* 3D spatial preservation helpers */
+.nyx-perspective {
+  perspective: 1400px;
+}
+
+.nyx-perspective-card {
+  perspective: 1000px;
+}
+
+.nyx-preserve-3d {
+  transform-style: preserve-3d;
+}
+
+.nyx-backface-hidden {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* CSS-based editorial studio spotlight driven by --spot-x / --spot-y */
+.nyx-editorial-spotlight {
+  --spot-x: 50%;
+  --spot-y: 42%;
+  --spot-opacity: 0;
+  background: radial-gradient(
+    260px circle at var(--spot-x) var(--spot-y),
+    rgba(243, 242, 240, 0.19) 0%,
+    rgba(167, 150, 201, 0.11) 36%,
+    rgba(16, 16, 20, 0) 72%
+  );
+  opacity: var(--spot-opacity);
+  mix-blend-mode: screen;
+  transition: opacity 280ms cubic-bezier(0.19, 1, 0.22, 1);
+  pointer-events: none;
+}
+
+.nyx-editorial-spotlight-ring {
+  --spot-x: 50%;
+  --spot-y: 42%;
+  --spot-opacity: 0;
+  background: radial-gradient(
+    420px circle at var(--spot-x) var(--spot-y),
+    rgba(243, 242, 240, 0.08) 0%,
+    rgba(7, 7, 9, 0.26) 62%,
+    rgba(7, 7, 9, 0.5) 100%
+  );
+  opacity: var(--spot-opacity);
+  transition: opacity 320ms cubic-bezier(0.19, 1, 0.22, 1);
+  pointer-events: none;
+}
+
+/* Subtle pulsing radial aura behind garment images */
+@keyframes nyx-aura-pulse {
+  0%,
+  100% {
+    opacity: 0.42;
+    transform: scale3d(0.96, 0.96, 1);
+  }
+  50% {
+    opacity: 0.78;
+    transform: scale3d(1.06, 1.06, 1);
+  }
+}
+
+.nyx-garment-aura {
+  background: radial-gradient(
+    circle at 50% 44%,
+    rgba(139, 124, 168, 0.28) 0%,
+    rgba(167, 150, 201, 0.12) 34%,
+    rgba(243, 242, 240, 0.03) 56%,
+    rgba(7, 7, 9, 0) 74%
+  );
+  animation: nyx-aura-pulse 7.2s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  will-change: transform, opacity;
+  pointer-events: none;
+}
+
+/* Main section scroll-snap alignment */
+.nyx-snap-section {
+  scroll-snap-align: start;
+  scroll-snap-stop: normal;
+}
+
+/* Dark gothic skeleton shimmer for garment & archive image loading */
+@keyframes nyx-skeleton-sweep {
+  0% {
+    transform: translate3d(-100%, 0, 0);
+  }
+  100% {
+    transform: translate3d(100%, 0, 0);
+  }
+}
+
+.nyx-skeleton-surface {
+  position: relative;
+  overflow: hidden;
+  background-color: #0b0b0f;
+}
+
+.nyx-skeleton-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 20%,
+    rgba(139, 124, 168, 0.09) 45%,
+    rgba(243, 242, 240, 0.06) 50%,
+    rgba(139, 124, 168, 0.09) 55%,
+    transparent 80%
+  );
+  animation: nyx-skeleton-sweep 2.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: transform;
+  pointer-events: none;
+}
+
+/* Custom NYKTERIA cursor active mode */
+html.nyx-custom-cursor-active,
+html.nyx-custom-cursor-active body,
+html.nyx-custom-cursor-active a,
+html.nyx-custom-cursor-active button,
+html.nyx-custom-cursor-active [role="button"],
+html.nyx-custom-cursor-active [role="tab"],
+html.nyx-custom-cursor-active [role="radio"],
+html.nyx-custom-cursor-active label {
+  cursor: none !important;
+}
+
+html.nyx-custom-cursor-active input,
+html.nyx-custom-cursor-active textarea,
+html.nyx-custom-cursor-active select {
+  cursor: text !important;
+}
+
+/* Minimalist equalizer bar motion for AmbientAudioToggle */
+@keyframes nyx-eq-bar {
+  0%,
+  100% {
+    transform: scaleY(0.45);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.nyx-eq-bar-1 {
+  transform-origin: bottom;
+  animation: nyx-eq-bar 1.9s ease-in-out infinite;
+}
+
+.nyx-eq-bar-2 {
+  transform-origin: bottom;
+  animation: nyx-eq-bar 1.45s ease-in-out infinite 0.35s;
+}
+
+.nyx-eq-bar-3 {
+  transform-origin: bottom;
+  animation: nyx-eq-bar 2.2s ease-in-out infinite 0.7s;
+}
+
+/* Reduced motion global safeguard */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+    scroll-snap-type: none;
+  }
+  * {
+    transition-duration: 0.01ms !important;
+  }
+  .nyx-garment-aura {
+    animation: none !important;
+    opacity: 0.55;
+    transform: none !important;
+  }
+  .nyx-skeleton-shimmer {
+    animation: none !important;
+    opacity: 0.35;
+    transform: none !important;
+  }
+  .nyx-eq-bar-1,
+  .nyx-eq-bar-2,
+  .nyx-eq-bar-3 {
+    animation: none !important;
+    transform: none !important;
+  }
+}
+
+html.nyx-reduced-motion {
+  scroll-behavior: auto;
+  scroll-snap-type: none;
+}
+
+html.nyx-reduced-motion * {
+  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms !important;
+}
+
+html.nyx-reduced-motion .nyx-garment-aura {
+  animation: none !important;
+  opacity: 0.55;
+  transform: none !important;
+}
+
+html.nyx-reduced-motion .nyx-skeleton-shimmer {
+  animation: none !important;
+  opacity: 0.35;
+  transform: none !important;
+}
+
+html.nyx-reduced-motion .nyx-eq-bar-1,
+html.nyx-reduced-motion .nyx-eq-bar-2,
+html.nyx-reduced-motion .nyx-eq-bar-3 {
+  animation: none !important;
+  transform: none !important;
+}
