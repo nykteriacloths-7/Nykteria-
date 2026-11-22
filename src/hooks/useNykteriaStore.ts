@@ -1,10 +1,42 @@
 import { useState, useEffect, useCallback } from 'react';
 import { INITIAL_PRODUCTS } from '../data/initialProducts';
 import { OrderReservation, OrderStatus, Product } from '../types';
+import { getEffectivePrice } from '../utils/pricing';
 
 const PRODUCTS_STORAGE_KEY = 'nykteria_products_v1';
 const ORDERS_STORAGE_KEY = 'nykteria_orders_v1';
+const TEST_ORDER_SEEDED_KEY = 'nykteria_test_order_seeded_v1';
 const REDUCED_MOTION_KEY = 'nykteria_reduced_motion_v1';
+
+function buildInitialTestOrder(): OrderReservation {
+  const leadPiece = INITIAL_PRODUCTS[0];
+  const pricing = getEffectivePrice(leadPiece);
+  return {
+    orderId: 'NYK-1024',
+    createdAt: new Date().toISOString(),
+    customerName: 'Test Order — Aarav Mehta',
+    contact: 'nykteriacloths@gmail.com',
+    city: 'Mumbai',
+    postalCode: '400001',
+    address: 'Suite 4B, Kala Ghoda Atelier Lane, Fort',
+    notes: 'Sample test allocation for verifying stage progression & tracking.',
+    items: [
+      {
+        productId: leadPiece.id,
+        productName: leadPiece.name,
+        category: leadPiece.category,
+        size: 'L',
+        quantity: 1,
+        unitPriceInr: pricing.originalPrice,
+        discountPercent: pricing.hasDiscount ? leadPiece.discountPercent : 0,
+        finalUnitPriceInr: pricing.finalPrice,
+        thumbnail: leadPiece.frontImage,
+      },
+    ],
+    totalInr: pricing.finalPrice,
+    status: 'Preparing Allocation',
+  };
+}
 
 function readStoredProducts(): Product[] {
   try {
@@ -23,9 +55,17 @@ function readStoredProducts(): Product[] {
 function readStoredOrders(): OrderReservation[] {
   try {
     const raw = window.localStorage.getItem(ORDERS_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as OrderReservation[];
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = raw ? (JSON.parse(raw) as OrderReservation[]) : [];
+    const list = Array.isArray(parsed) ? parsed : [];
+    const alreadySeeded = window.localStorage.getItem(TEST_ORDER_SEEDED_KEY) === 'true';
+
+    if (list.length === 0 && !alreadySeeded) {
+      const seedOrder = buildInitialTestOrder();
+      window.localStorage.setItem(TEST_ORDER_SEEDED_KEY, 'true');
+      window.localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify([seedOrder]));
+      return [seedOrder];
+    }
+    return list;
   } catch {
     return [];
   }
@@ -123,6 +163,39 @@ export function useNykteriaStore() {
     setOrders((prev) => [order, ...prev]);
   }, []);
 
+  const createTestOrder = useCallback((): OrderReservation => {
+    const targetProduct = products[0] ?? INITIAL_PRODUCTS[0];
+    const pricing = getEffectivePrice(targetProduct);
+    const randomCode = Math.floor(1000 + Math.random() * 9000);
+    const testOrder: OrderReservation = {
+      orderId: `NYK-${randomCode}`,
+      createdAt: new Date().toISOString(),
+      customerName: 'Test Order — Verification Sample',
+      contact: 'nykteriacloths@gmail.com',
+      city: 'Mumbai',
+      postalCode: '400001',
+      address: 'Studio Allocation Bay 04, Fort',
+      notes: 'Generated live test order for verification.',
+      items: [
+        {
+          productId: targetProduct.id,
+          productName: targetProduct.name,
+          category: targetProduct.category,
+          size: 'L',
+          quantity: 1,
+          unitPriceInr: pricing.originalPrice,
+          discountPercent: pricing.hasDiscount ? targetProduct.discountPercent : 0,
+          finalUnitPriceInr: pricing.finalPrice,
+          thumbnail: targetProduct.frontImage,
+        },
+      ],
+      totalInr: pricing.finalPrice,
+      status: 'Confirmed Reservation',
+    };
+    setOrders((prev) => [testOrder, ...prev]);
+    return testOrder;
+  }, [products]);
+
   const updateOrderStatus = useCallback((orderId: string, status: OrderStatus) => {
     setOrders((prev) =>
       prev.map((order) => (order.orderId === orderId ? { ...order, status } : order))
@@ -139,6 +212,7 @@ export function useNykteriaStore() {
     removeProduct,
     resetProductsToDefault,
     addOrderReservation,
+    createTestOrder,
     updateOrderStatus,
   };
 }

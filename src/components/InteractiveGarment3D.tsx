@@ -411,7 +411,7 @@ export function InteractiveGarment3D({
         onPointerCancel={handlePointerUp}
         onPointerLeave={handlePointerLeave}
         onDoubleClick={triggerFlip}
-        className={`relative min-h-[390px] aspect-[4/5] sm:aspect-[3/4] w-full bg-[#070709] border border-[#F3F2F0]/12 overflow-hidden nyx-perspective select-none touch-pan-y ${
+        className={`relative min-h-[390px] aspect-[4/5] sm:aspect-[3/4] w-full bg-[#0e0e14] border border-[#F3F2F0]/16 overflow-hidden nyx-perspective select-none touch-pan-y ${
           isLensActive
             ? 'cursor-crosshair'
             : isDragging
@@ -426,7 +426,7 @@ export function InteractiveGarment3D({
           className="absolute inset-0 pointer-events-none"
           style={{
             background:
-              'radial-gradient(ellipse at 50% 42%, rgba(167, 150, 201, 0.14) 0%, rgba(14, 14, 20, 0.58) 46%, rgba(7, 7, 9, 0.99) 80%)',
+              'radial-gradient(ellipse at 50% 42%, rgba(167, 150, 201, 0.22) 0%, rgba(28, 28, 40, 0.72) 48%, rgba(14, 14, 20, 0.96) 82%)',
           }}
         />
 
@@ -437,20 +437,20 @@ export function InteractiveGarment3D({
         <div
           ref={backdropPlaneRef}
           aria-hidden="true"
-          className="absolute inset-3.5 sm:inset-5 border border-[#F3F2F0]/[0.06] pointer-events-none will-change-transform"
+          className="absolute inset-3.5 sm:inset-5 border border-[#F3F2F0]/[0.09] pointer-events-none will-change-transform"
         >
-          <div className="absolute inset-x-0 top-1/2 h-[1px] bg-[#F3F2F0]/[0.04]" />
-          <div className="absolute inset-y-0 left-1/2 w-[1px] bg-[#F3F2F0]/[0.04]" />
-          <span className="absolute -top-2 -left-1.5 font-mono-num text-[11px] text-[#F3F2F0]/25">
+          <div className="absolute inset-x-0 top-1/2 h-[1px] bg-[#F3F2F0]/[0.06]" />
+          <div className="absolute inset-y-0 left-1/2 w-[1px] bg-[#F3F2F0]/[0.06]" />
+          <span className="absolute -top-2 -left-1.5 font-mono-num text-[11px] text-[#F3F2F0]/35">
             +
           </span>
-          <span className="absolute -top-2 -right-1.5 font-mono-num text-[11px] text-[#F3F2F0]/25">
+          <span className="absolute -top-2 -right-1.5 font-mono-num text-[11px] text-[#F3F2F0]/35">
             +
           </span>
-          <span className="absolute -bottom-2 -left-1.5 font-mono-num text-[11px] text-[#F3F2F0]/25">
+          <span className="absolute -bottom-2 -left-1.5 font-mono-num text-[11px] text-[#F3F2F0]/35">
             +
           </span>
-          <span className="absolute -bottom-2 -right-1.5 font-mono-num text-[11px] text-[#F3F2F0]/25">
+          <span className="absolute -bottom-2 -right-1.5 font-mono-num text-[11px] text-[#F3F2F0]/35">
             +
           </span>
         </div>

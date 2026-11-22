@@ -33,7 +33,7 @@ export function CraftFitSection({ reducedMotion }: CraftFitSectionProps) {
   return (
     <section
       id="craft-fit"
-      className="py-20 sm:py-28 bg-[#0b0b0e] border-b border-[#F3F2F0]/10"
+      className="py-20 sm:py-28 bg-[#13131c] border-b border-[#F3F2F0]/12"
     >
       <div className="mx-auto max-w-[1360px] px-4 sm:px-8">
         <CinematicSectionReveal reducedMotion={reducedMotion}>

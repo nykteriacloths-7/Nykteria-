@@ -31,6 +31,7 @@ export default function App() {
     removeProduct,
     resetProductsToDefault,
     addOrderReservation,
+    createTestOrder,
     updateOrderStatus,
   } = useNykteriaStore();
 
@@ -152,7 +153,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="relative min-h-screen bg-[#070709] text-[#F3F2F0] flex flex-col">
+    <div className="relative min-h-screen bg-[#0f0f15] text-[#F3F2F0] flex flex-col">
       <NykteriaCursor reducedMotion={reducedMotion} />
 
       {/* Subtle matte editorial grain */}
@@ -206,6 +207,7 @@ export default function App() {
           onAddProduct={addProduct}
           onRemoveProduct={removeProduct}
           onUpdateOrderStatus={updateOrderStatus}
+          onCreateTestOrder={createTestOrder}
           onOpenOrderStatus={() => handleOpenOrderStatus()}
           onResetDefaults={resetProductsToDefault}
         />

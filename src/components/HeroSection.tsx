@@ -28,7 +28,7 @@ export function HeroSection({ activePieceCount, reducedMotion }: HeroSectionProp
 
   const bgY = useTransform(smoothProgress, [0, 1], ['0%', '18%']);
   const bgScale = useTransform(smoothProgress, [0, 1], [1.03, 1.13]);
-  const bgOpacity = useTransform(smoothProgress, [0, 0.85, 1], [0.78, 0.45, 0.2]);
+  const bgOpacity = useTransform(smoothProgress, [0, 0.85, 1], [0.94, 0.62, 0.3]);
   const contentY = useTransform(smoothProgress, [0, 1], [0, -48]);
   const contentOpacity = useTransform(smoothProgress, [0, 0.72, 1], [1, 0.85, 0.15]);
 
@@ -36,13 +36,13 @@ export function HeroSection({ activePieceCount, reducedMotion }: HeroSectionProp
     <section
       ref={sectionRef}
       id="top"
-      className="relative min-h-[94vh] sm:min-h-[98vh] flex items-end pt-24 pb-16 sm:pb-24 overflow-hidden bg-[#070709] border-b border-[#F3F2F0]/10"
+      className="relative min-h-[94vh] sm:min-h-[98vh] flex items-end pt-24 pb-16 sm:pb-24 overflow-hidden bg-[#0f0f15] border-b border-[#F3F2F0]/10"
     >
       {/* Scroll-linked 3D depth backdrop */}
       <motion.div
         style={
           reducedMotion
-            ? { transform: 'scale(1.02)', opacity: 0.75 }
+            ? { transform: 'scale(1.02)', opacity: 0.9 }
             : { y: bgY, scale: bgScale, opacity: bgOpacity }
         }
         className="absolute inset-0 will-change-transform origin-center"
@@ -58,17 +58,17 @@ export function HeroSection({ activePieceCount, reducedMotion }: HeroSectionProp
       {/* Measured contrast scrims */}
       <div
         aria-hidden="true"
-        className="absolute inset-0 bg-gradient-to-t from-[#070709] via-[#070709]/60 to-[#070709]/30"
+        className="absolute inset-0 bg-gradient-to-t from-[#0f0f15]/92 via-[#0f0f15]/36 to-[#0f0f15]/10"
       />
       <div
         aria-hidden="true"
-        className="absolute inset-0 bg-gradient-to-r from-[#070709]/92 via-[#070709]/45 to-transparent"
+        className="absolute inset-0 bg-gradient-to-r from-[#0f0f15]/78 via-[#0f0f15]/26 to-transparent"
       />
 
       {/* Subtle architectural vignette framing */}
       <div
         aria-hidden="true"
-        className="absolute inset-6 sm:inset-10 border border-[#F3F2F0]/[0.06] pointer-events-none"
+        className="absolute inset-6 sm:inset-10 border border-[#F3F2F0]/[0.09] pointer-events-none"
       />
 
       <motion.div

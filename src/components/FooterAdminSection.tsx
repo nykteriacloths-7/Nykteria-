@@ -13,6 +13,7 @@ interface FooterAdminSectionProps {
   onAddProduct: (product: Product) => void;
   onRemoveProduct: (productId: string) => void;
   onUpdateOrderStatus: (orderId: string, status: OrderStatus) => void;
+  onCreateTestOrder: () => OrderReservation;
   onOpenOrderStatus: () => void;
   onResetDefaults: () => void;
 }
@@ -26,6 +27,7 @@ export function FooterAdminSection({
   onAddProduct,
   onRemoveProduct,
   onUpdateOrderStatus,
+  onCreateTestOrder,
   onOpenOrderStatus,
   onResetDefaults,
 }: FooterAdminSectionProps) {
@@ -47,7 +49,7 @@ export function FooterAdminSection({
   };
 
   return (
-    <footer className="bg-[#070709] pt-16 pb-12">
+    <footer className="bg-[#0f0f15] pt-16 pb-12">
       <div className="mx-auto max-w-[1360px] px-4 sm:px-8">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-10 pb-12 border-b border-[#F3F2F0]/10">
           <div className="md:col-span-6">
@@ -136,6 +138,7 @@ export function FooterAdminSection({
             onAddProduct={onAddProduct}
             onRemoveProduct={onRemoveProduct}
             onUpdateOrderStatus={onUpdateOrderStatus}
+            onCreateTestOrder={onCreateTestOrder}
             onResetDefaults={onResetDefaults}
             onClosePanel={() => setAdminOpen(false)}
           />

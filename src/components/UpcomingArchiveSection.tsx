@@ -54,7 +54,7 @@ export function UpcomingArchiveSection({
   return (
     <section
       id="upcoming-archive"
-      className="py-20 sm:py-24 bg-[#070709] border-b border-[#F3F2F0]/10"
+      className="py-20 sm:py-24 bg-[#0f0f15] border-b border-[#F3F2F0]/12"
     >
       <div className="mx-auto max-w-[1360px] px-4 sm:px-8">
         <CinematicSectionReveal reducedMotion={reducedMotion}>

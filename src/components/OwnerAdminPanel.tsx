@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Lock, Plus, RotateCcw, Trash2, Upload, Check } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Lock, Plus, RotateCcw, Trash2, Upload, Check, KeyRound, FlaskConical } from 'lucide-react';
 import { GarmentSize, OrderReservation, OrderStatus, Product } from '../types';
 import { formatInr, getEffectivePrice } from '../utils/pricing';
 import { ResilientGarmentImage } from './ResilientGarmentImage';
@@ -12,6 +12,7 @@ interface OwnerAdminPanelProps {
   onAddProduct: (product: Product) => void;
   onRemoveProduct: (productId: string) => void;
   onUpdateOrderStatus: (orderId: string, status: OrderStatus) => void;
+  onCreateTestOrder: () => OrderReservation;
   onResetDefaults: () => void;
   onClosePanel: () => void;
 }
@@ -25,7 +26,6 @@ const ORDER_STATUS_OPTIONS: OrderStatus[] = [
   'Quality Inspection',
   'Dispatched',
 ];
-const OWNER_PASSCODE = 'NYK2026';
 
 export function OwnerAdminPanel({
   products,
@@ -34,12 +34,26 @@ export function OwnerAdminPanel({
   onAddProduct,
   onRemoveProduct,
   onUpdateOrderStatus,
+  onCreateTestOrder,
   onResetDefaults,
   onClosePanel,
 }: OwnerAdminPanelProps) {
-  const [unlocked, setUnlocked] = useState(false);
-  const [pinInput, setPinInput] = useState('');
-  const [pinError, setPinError] = useState('');
+  const [authMode, setAuthMode] = useState<'loading' | 'claim' | 'login'>('loading');
+  const [authToken, setAuthToken] = useState<string | null>(null);
+  const [authenticatedEmail, setAuthenticatedEmail] = useState('');
+  const [envManaged, setEnvManaged] = useState(false);
+
+  const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [authError, setAuthError] = useState('');
+
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [currentPwInput, setCurrentPwInput] = useState('');
+  const [newPwInput, setNewPwInput] = useState('');
+  const [pwChangeMessage, setPwChangeMessage] = useState('');
+
   const [activeTab, setActiveTab] = useState<AdminTab>('edit');
   const [statusNotice, setStatusNotice] = useState('');
 
@@ -61,21 +75,144 @@ export function OwnerAdminPanel({
     XL: true,
   });
 
+  const unlocked = Boolean(authToken);
+
   const showFlash = (msg: string) => {
     setStatusNotice(msg);
     window.setTimeout(() => setStatusNotice(''), 2600);
   };
 
-  const handleUnlock = (e: React.FormEvent) => {
+  useEffect(() => {
+    let active = true;
+    fetch('/api/admin/status')
+      .then((res) => res.json())
+      .then((data) => {
+        if (!active) return;
+        setEnvManaged(Boolean(data.envManaged));
+        setAuthMode(data.isConfigured ? 'login' : 'claim');
+      })
+      .catch(() => {
+        if (!active) return;
+        setAuthMode('login');
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (pinInput.trim() === OWNER_PASSCODE) {
-      triggerHaptic('lock');
-      setUnlocked(true);
-      setPinInput('');
-      setPinError('');
-    } else {
+    const trimmedEmail = emailInput.trim();
+    if (!trimmedEmail || !passwordInput) {
       triggerHaptic('error');
-      setPinError('Invalid owner passcode.');
+      setAuthError('Enter your registered owner email and password.');
+      return;
+    }
+
+    if (authMode === 'claim') {
+      if (passwordInput.length < 6) {
+        triggerHaptic('error');
+        setAuthError('Create a password with at least 6 characters.');
+        return;
+      }
+      if (passwordInput !== confirmPasswordInput) {
+        triggerHaptic('error');
+        setAuthError('Passwords do not match.');
+        return;
+      }
+    }
+
+    setAuthSubmitting(true);
+    setAuthError('');
+    try {
+      const endpoint = authMode === 'claim' ? '/api/admin/claim' : '/api/admin/login';
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: trimmedEmail,
+          password: passwordInput,
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        triggerHaptic('error');
+        if (data.needsSetup) {
+          setAuthMode('claim');
+        }
+        setAuthError(data.error || 'Authentication failed.');
+        return;
+      }
+
+      triggerHaptic('lock');
+      setAuthToken(data.token);
+      setAuthenticatedEmail(data.ownerEmail || trimmedEmail.toLowerCase());
+      setEnvManaged(Boolean(data.envManaged));
+      setPasswordInput('');
+      setConfirmPasswordInput('');
+      setAuthError('');
+    } catch {
+      triggerHaptic('error');
+      setAuthError('Unable to reach server authentication service.');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleLockAdmin = async () => {
+    triggerHaptic('lock');
+    if (authToken) {
+      try {
+        await fetch('/api/admin/logout', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+      } catch {
+        // Proceed clearing client memory token regardless
+      }
+    }
+    setAuthToken(null);
+    setAuthenticatedEmail('');
+    setPasswordInput('');
+    setConfirmPasswordInput('');
+    setAuthError('');
+    setShowChangePassword(false);
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authToken) return;
+    if (newPwInput.length < 6) {
+      setPwChangeMessage('New password must be at least 6 characters.');
+      return;
+    }
+    try {
+      const res = await fetch('/api/admin/change-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          currentPassword: currentPwInput,
+          newPassword: newPwInput,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        triggerHaptic('error');
+        setPwChangeMessage(data.error || 'Unable to update password.');
+        return;
+      }
+      triggerHaptic('select');
+      setCurrentPwInput('');
+      setNewPwInput('');
+      setPwChangeMessage('');
+      setShowChangePassword(false);
+      showFlash('Owner password updated.');
+    } catch {
+      setPwChangeMessage('Unable to update password.');
     }
   };
 
@@ -183,37 +320,165 @@ export function OwnerAdminPanel({
         <div className="py-8 sm:py-10 max-w-md">
           <div className="flex items-center gap-2.5 text-sm text-[#F3F2F0] mb-2">
             <Lock className="w-4 h-4 text-[#8B7CA8]" />
-            <span>Owner Passcode Required</span>
+            <span>
+              {authMode === 'claim'
+                ? 'Initialize Owner Email & Password'
+                : 'Owner Email & Password Required'}
+            </span>
           </div>
           <p className="text-xs text-[#A1A1AA] mb-5 leading-relaxed">
-            Restricted storefront console for modifying active garment prices, launch discounts, and
-            allocation records.
+            {authMode === 'claim'
+              ? 'First-time storefront setup: verify your fixed NYKTERIA owner email and create your admin password to lock access.'
+              : 'Restricted storefront console bound to the registered NYKTERIA owner email for pricing, discounts, and order management.'}
           </p>
 
-          <form onSubmit={handleUnlock} className="flex flex-wrap items-center gap-3">
-            <input
-              type="password"
-              value={pinInput}
-              onChange={(e) => {
-                setPinInput(e.target.value);
-                if (pinError) setPinError('');
-              }}
-              placeholder="Enter owner passcode"
-              aria-label="Owner passcode"
-              autoComplete="off"
-              className="w-48 bg-[#101014] border border-[#F3F2F0]/15 px-3.5 py-2.5 text-sm font-mono-num text-[#F3F2F0] placeholder:text-[#52525B] focus:outline-none focus:border-[#8B7CA8] min-h-[44px]"
-            />
-            <button
-              type="submit"
-              className="px-5 py-2.5 bg-[#F3F2F0] text-[#070709] hover:bg-[#E4E2DE] text-xs font-semibold tracking-[0.12em] uppercase cursor-pointer min-h-[44px] transition-colors"
-            >
-              Unlock Console
-            </button>
-          </form>
-          {pinError && <p className="mt-3 text-xs text-red-400">{pinError}</p>}
+          {authMode === 'loading' ? (
+            <p className="text-xs font-mono-num uppercase tracking-[0.12em] text-[#A1A1AA]">
+              Checking owner access status...
+            </p>
+          ) : (
+            <form onSubmit={handleAuthSubmit} className="space-y-3">
+              <div>
+                <label htmlFor="nyx-owner-email" className="block text-xs text-[#A1A1AA] mb-1">
+                  Owner Email
+                </label>
+                <input
+                  id="nyx-owner-email"
+                  type="email"
+                  required
+                  value={emailInput}
+                  onChange={(e) => {
+                    setEmailInput(e.target.value);
+                    if (authError) setAuthError('');
+                  }}
+                  placeholder="Enter registered owner email"
+                  autoComplete="email"
+                  className="w-full bg-[#15151d] border border-[#F3F2F0]/15 px-3.5 py-2.5 text-sm text-[#F3F2F0] placeholder:text-[#71717A] focus:outline-none focus:border-[#8B7CA8] min-h-[44px]"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="nyx-owner-password" className="block text-xs text-[#A1A1AA] mb-1">
+                  {authMode === 'claim' ? 'Create Admin Password' : 'Password'}
+                </label>
+                <input
+                  id="nyx-owner-password"
+                  type="password"
+                  required
+                  value={passwordInput}
+                  onChange={(e) => {
+                    setPasswordInput(e.target.value);
+                    if (authError) setAuthError('');
+                  }}
+                  placeholder={
+                    authMode === 'claim' ? 'Minimum 6 characters' : 'Enter owner password'
+                  }
+                  autoComplete={authMode === 'claim' ? 'new-password' : 'current-password'}
+                  className="w-full bg-[#15151d] border border-[#F3F2F0]/15 px-3.5 py-2.5 text-sm text-[#F3F2F0] placeholder:text-[#71717A] focus:outline-none focus:border-[#8B7CA8] min-h-[44px]"
+                />
+              </div>
+
+              {authMode === 'claim' && (
+                <div>
+                  <label
+                    htmlFor="nyx-owner-confirm-password"
+                    className="block text-xs text-[#A1A1AA] mb-1"
+                  >
+                    Confirm Password
+                  </label>
+                  <input
+                    id="nyx-owner-confirm-password"
+                    type="password"
+                    required
+                    value={confirmPasswordInput}
+                    onChange={(e) => {
+                      setConfirmPasswordInput(e.target.value);
+                      if (authError) setAuthError('');
+                    }}
+                    placeholder="Re-enter password"
+                    autoComplete="new-password"
+                    className="w-full bg-[#15151d] border border-[#F3F2F0]/15 px-3.5 py-2.5 text-sm text-[#F3F2F0] placeholder:text-[#71717A] focus:outline-none focus:border-[#8B7CA8] min-h-[44px]"
+                  />
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={authSubmitting}
+                className="px-5 py-2.5 bg-[#F3F2F0] text-[#0b0b10] hover:bg-[#E4E2DE] disabled:opacity-60 text-xs font-semibold tracking-[0.12em] uppercase cursor-pointer min-h-[44px] transition-colors"
+              >
+                {authSubmitting
+                  ? 'Verifying...'
+                  : authMode === 'claim'
+                  ? 'Set Password & Unlock'
+                  : 'Sign In & Unlock'}
+              </button>
+            </form>
+          )}
+          {authError && <p className="mt-3 text-xs text-red-400">{authError}</p>}
         </div>
       ) : (
         <div className="pt-6 space-y-6">
+          {/* Verified Owner Strip */}
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-[#A1A1AA] pb-4 border-b border-[#F3F2F0]/10">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[#8B7CA8] uppercase tracking-[0.12em]">Verified Owner</span>
+              <span aria-hidden="true">·</span>
+              <span className="font-mono-num text-[#F3F2F0]">{authenticatedEmail}</span>
+            </div>
+            {!envManaged && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowChangePassword((prev) => !prev);
+                  setPwChangeMessage('');
+                }}
+                className="inline-flex items-center gap-1.5 text-xs text-[#A796C9] hover:text-[#F3F2F0] cursor-pointer"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>{showChangePassword ? 'Cancel Password Edit' : 'Change Password'}</span>
+              </button>
+            )}
+          </div>
+
+          {showChangePassword && !envManaged && (
+            <form
+              onSubmit={handleChangePassword}
+              className="border border-[#F3F2F0]/10 bg-[#15151d] p-4 grid grid-cols-1 sm:grid-cols-3 gap-3 items-end"
+            >
+              <div>
+                <label className="block text-xs text-[#A1A1AA] mb-1">Current Password</label>
+                <input
+                  type="password"
+                  required
+                  value={currentPwInput}
+                  onChange={(e) => setCurrentPwInput(e.target.value)}
+                  className="w-full bg-[#0f0f15] border border-[#F3F2F0]/15 px-3 py-2 text-sm text-[#F3F2F0]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-[#A1A1AA] mb-1">New Password</label>
+                <input
+                  type="password"
+                  required
+                  value={newPwInput}
+                  onChange={(e) => setNewPwInput(e.target.value)}
+                  placeholder="Min 6 chars"
+                  className="w-full bg-[#0f0f15] border border-[#F3F2F0]/15 px-3 py-2 text-sm text-[#F3F2F0]"
+                />
+              </div>
+              <button
+                type="submit"
+                className="px-4 py-2.5 bg-[#F3F2F0] text-[#0b0b10] text-xs font-semibold uppercase tracking-[0.1em] cursor-pointer min-h-[40px]"
+              >
+                Update Password
+              </button>
+              {pwChangeMessage && (
+                <p className="sm:col-span-3 text-xs text-red-400">{pwChangeMessage}</p>
+              )}
+            </form>
+          )}
+
           {/* Admin Controls & Tabs */}
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap items-center gap-2" role="tablist">
@@ -224,8 +489,8 @@ export function OwnerAdminPanel({
                 onClick={() => setActiveTab('edit')}
                 className={`px-4 py-2 text-xs font-medium uppercase tracking-[0.1em] border cursor-pointer ${
                   activeTab === 'edit'
-                    ? 'bg-[#F3F2F0] text-[#070709] border-[#F3F2F0]'
-                    : 'bg-[#101014] text-[#A1A1AA] border-[#F3F2F0]/15 hover:text-[#F3F2F0]'
+                    ? 'bg-[#F3F2F0] text-[#0b0b10] border-[#F3F2F0]'
+                    : 'bg-[#15151d] text-[#A1A1AA] border-[#F3F2F0]/15 hover:text-[#F3F2F0]'
                 }`}
               >
                 Edit Prices & Offers ({products.length})
@@ -237,8 +502,8 @@ export function OwnerAdminPanel({
                 onClick={() => setActiveTab('add')}
                 className={`inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium uppercase tracking-[0.1em] border cursor-pointer ${
                   activeTab === 'add'
-                    ? 'bg-[#F3F2F0] text-[#070709] border-[#F3F2F0]'
-                    : 'bg-[#101014] text-[#A1A1AA] border-[#F3F2F0]/15 hover:text-[#F3F2F0]'
+                    ? 'bg-[#F3F2F0] text-[#0b0b10] border-[#F3F2F0]'
+                    : 'bg-[#15151d] text-[#A1A1AA] border-[#F3F2F0]/15 hover:text-[#F3F2F0]'
                 }`}
               >
                 <Plus className="w-3.5 h-3.5" />
@@ -251,8 +516,8 @@ export function OwnerAdminPanel({
                 onClick={() => setActiveTab('orders')}
                 className={`px-4 py-2 text-xs font-medium uppercase tracking-[0.1em] border cursor-pointer ${
                   activeTab === 'orders'
-                    ? 'bg-[#F3F2F0] text-[#070709] border-[#F3F2F0]'
-                    : 'bg-[#101014] text-[#A1A1AA] border-[#F3F2F0]/15 hover:text-[#F3F2F0]'
+                    ? 'bg-[#F3F2F0] text-[#0b0b10] border-[#F3F2F0]'
+                    : 'bg-[#15151d] text-[#A1A1AA] border-[#F3F2F0]/15 hover:text-[#F3F2F0]'
                 }`}
               >
                 Reservations ({orders.length})
@@ -273,13 +538,8 @@ export function OwnerAdminPanel({
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  triggerHaptic('lock');
-                  setUnlocked(false);
-                  setPinInput('');
-                  setPinError('');
-                }}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-[#8B7CA8]/45 bg-[#101014] text-xs font-medium tracking-[0.08em] uppercase text-[#F3F2F0] hover:border-[#A796C9] cursor-pointer min-h-[40px]"
+                onClick={handleLockAdmin}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 border border-[#8B7CA8]/45 bg-[#15151d] text-xs font-medium tracking-[0.08em] uppercase text-[#F3F2F0] hover:border-[#A796C9] cursor-pointer min-h-[40px]"
               >
                 <Lock className="w-3.5 h-3.5 text-[#A796C9]" />
                 <span>Lock Admin</span>
@@ -653,7 +913,30 @@ export function OwnerAdminPanel({
 
           {/* TAB 3: Reservations */}
           {activeTab === 'orders' && (
-            <div className="border border-[#F3F2F0]/10 bg-[#101014] p-5">
+            <div className="border border-[#F3F2F0]/10 bg-[#15151d] p-5 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-[#F3F2F0]/10">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.14em] text-[#F3F2F0]">
+                    Reservation Pipeline
+                  </p>
+                  <p className="text-xs text-[#A1A1AA] mt-0.5">
+                    Advance garment status live or generate a test allocation for QA verification.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const created = onCreateTestOrder();
+                    triggerHaptic('confirmOrder');
+                    showFlash(`Test order #${created.orderId} created.`);
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2 border border-[#8B7CA8]/60 bg-[#0f0f15] hover:border-[#A796C9] text-xs font-medium uppercase tracking-[0.1em] text-[#F3F2F0] whitespace-nowrap shrink-0 min-h-[40px] cursor-pointer"
+                >
+                  <FlaskConical className="w-3.5 h-3.5 text-[#A796C9]" />
+                  <span>Run Test Order</span>
+                </button>
+              </div>
+
               {orders.length === 0 ? (
                 <p className="text-sm text-[#A1A1AA] py-6 text-center">
                   No reservations submitted yet in this browser.
@@ -697,7 +980,7 @@ export function OwnerAdminPanel({
                               className={`px-2.5 py-1.5 text-[11px] font-medium border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                                 active
                                   ? 'border-[#8B7CA8] bg-[#8B7CA8]/20 text-[#F3F2F0]'
-                                  : 'border-[#F3F2F0]/10 bg-[#070709] text-[#A1A1AA] hover:text-[#F3F2F0]'
+                                  : 'border-[#F3F2F0]/10 bg-[#0f0f15] text-[#A1A1AA] hover:text-[#F3F2F0]'
                               }`}
                             >
                               {stage}

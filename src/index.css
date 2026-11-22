@@ -3,15 +3,15 @@
 
 @layer base {
   :root {
-    --nyx-bg: #070709;
-    --nyx-surface: #101014;
-    --nyx-surface-elevated: #15151b;
+    --nyx-bg: #0f0f15;
+    --nyx-surface: #16161f;
+    --nyx-surface-elevated: #1e1e2a;
     --nyx-bone: #f3f2f0;
     --nyx-ash: #a1a1aa;
     --nyx-violet: #8b7ca8;
     --nyx-violet-bright: #a796c9;
-    --nyx-hairline: rgba(243, 242, 240, 0.08);
-    --nyx-hairline-strong: rgba(243, 242, 240, 0.16);
+    --nyx-hairline: rgba(243, 242, 240, 0.1);
+    --nyx-hairline-strong: rgba(243, 242, 240, 0.18);
   }
 
   html {
@@ -25,6 +25,9 @@
 
   body {
     background-color: var(--nyx-bg);
+    background-image:
+      radial-gradient(ellipse 85% 45% at 50% 0%, rgba(139, 124, 168, 0.095), transparent 65%),
+      radial-gradient(ellipse 65% 45% at 88% 58%, rgba(167, 150, 201, 0.06), transparent 72%);
     color: var(--nyx-bone);
     overflow-x: hidden;
   }
@@ -45,8 +48,8 @@
 
 /* Subtle matte editorial film grain */
 .nyx-grain-overlay {
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.35'/%3E%3C/svg%3E");
-  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.4'/%3E%3C/svg%3E");
+  opacity: 0.045;
   pointer-events: none;
 }
 
@@ -116,10 +119,10 @@
 .nyx-garment-aura {
   background: radial-gradient(
     circle at 50% 44%,
-    rgba(139, 124, 168, 0.28) 0%,
-    rgba(167, 150, 201, 0.12) 34%,
-    rgba(243, 242, 240, 0.03) 56%,
-    rgba(7, 7, 9, 0) 74%
+    rgba(139, 124, 168, 0.36) 0%,
+    rgba(167, 150, 201, 0.17) 36%,
+    rgba(243, 242, 240, 0.05) 58%,
+    rgba(15, 15, 21, 0) 76%
   );
   animation: nyx-aura-pulse 7.2s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
   will-change: transform, opacity;
