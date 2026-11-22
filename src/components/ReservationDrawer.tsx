@@ -1,9 +1,28 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { X, Trash2, Plus, Minus, CheckCircle2, ArrowRight, FlaskConical, MailCheck } from 'lucide-react';
+import {
+  X,
+  Trash2,
+  Plus,
+  Minus,
+  CheckCircle2,
+  ArrowRight,
+  FlaskConical,
+  MailCheck,
+  AlertTriangle,
+  ExternalLink,
+  Copy,
+  Check,
+} from 'lucide-react';
 import { CartReservationItem, GarmentSize, OrderReservation, Product } from '../types';
 import { formatInr, getEffectivePrice } from '../utils/pricing';
-import { sendOrderEmailViaFormSubmit, STORE_OWNER_EMAIL } from '../utils/orderEmail';
+import {
+  buildOrderMailtoHref,
+  buildOrderSummaryText,
+  EmailDispatchResult,
+  sendOrderEmailViaFormSubmit,
+  STORE_OWNER_EMAIL,
+} from '../utils/orderEmail';
 import { ResilientGarmentImage } from './ResilientGarmentImage';
 import { triggerHaptic } from '../utils/haptics';
 
@@ -53,7 +72,8 @@ export function ReservationDrawer({
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmedOrder, setConfirmedOrder] = useState<OrderReservation | null>(null);
-  const [emailStatusNote, setEmailStatusNote] = useState('');
+  const [emailDispatch, setEmailDispatch] = useState<EmailDispatchResult | null>(null);
+  const [copiedSummary, setCopiedSummary] = useState(false);
 
   const subtotalOriginal = items.reduce(
     (sum, item) => sum + item.unitPriceInr * item.quantity,
@@ -68,6 +88,8 @@ export function ReservationDrawer({
   const finalizeAndSendOrder = async (order: OrderReservation, clearCurrentBag: boolean) => {
     setIsSubmitting(true);
     setFormError('');
+    setEmailDispatch(null);
+    setCopiedSummary(false);
 
     // Persist locally immediately so Admin & Order Status always record the order
     onSubmitReservation(order);
@@ -84,8 +106,29 @@ export function ReservationDrawer({
         ? { ...prev, emailDelivered: emailResult.delivered }
         : prev
     );
-    setEmailStatusNote(emailResult.message);
+    setEmailDispatch(emailResult);
     setIsSubmitting(false);
+  };
+
+  const handleCopySummary = async (order: OrderReservation) => {
+    const summary = buildOrderSummaryText(order);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(summary);
+      } else {
+        const el = document.createElement('textarea');
+        el.value = summary;
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+      }
+      triggerHaptic('tap');
+      setCopiedSummary(true);
+      window.setTimeout(() => setCopiedSummary(false), 2600);
+    } catch {
+      // Ignore copy errors
+    }
   };
 
   const handleConfirmOrder = async (e: React.FormEvent) => {
@@ -175,7 +218,8 @@ export function ReservationDrawer({
 
   const handleClose = () => {
     setConfirmedOrder(null);
-    setEmailStatusNote('');
+    setEmailDispatch(null);
+    setCopiedSummary(false);
     setFormError('');
     onClose();
   };
@@ -236,7 +280,7 @@ export function ReservationDrawer({
                   <div className="border border-[#8B7CA8]/50 bg-[#15151d] p-6">
                     <div className="flex items-start gap-3">
                       <CheckCircle2 className="w-5 h-5 text-[#A796C9] shrink-0 mt-0.5" />
-                      <div>
+                      <div className="flex-1 min-w-0">
                         <p className="font-mono-num text-xs uppercase tracking-[0.14em] text-[#A796C9]">
                           Order #{confirmedOrder.orderId} · {confirmedOrder.status}
                         </p>
@@ -248,12 +292,74 @@ export function ReservationDrawer({
                           verification target: {confirmedOrder.contact}.
                         </p>
 
-                        <div className="mt-3 pt-3 border-t border-[#F3F2F0]/10 flex items-center gap-2 text-xs text-[#D4D4D8]">
-                          <MailCheck className="w-4 h-4 text-[#A796C9] shrink-0" />
-                          <span>
-                            {emailStatusNote ||
-                              `Sending order dispatch email to ${STORE_OWNER_EMAIL}...`}
-                          </span>
+                        {/* Real FormSubmit Delivery Status & Fallback */}
+                        <div className="mt-4 pt-3.5 border-t border-[#F3F2F0]/10 space-y-3">
+                          {isSubmitting || !emailDispatch ? (
+                            <div className="flex items-center gap-2 text-xs text-[#D4D4D8]">
+                              <MailCheck className="w-4 h-4 text-[#A796C9] shrink-0 animate-pulse" />
+                              <span>Sending order email to {STORE_OWNER_EMAIL}...</span>
+                            </div>
+                          ) : emailDispatch.delivered ? (
+                            <div className="border border-[#8B7CA8]/40 bg-[#0e0e14] p-3.5 space-y-1.5">
+                              <div className="flex items-center gap-2 text-xs font-medium text-[#F3F2F0]">
+                                <MailCheck className="w-4 h-4 text-[#A796C9] shrink-0" />
+                                <span>Order sent to {STORE_OWNER_EMAIL}</span>
+                              </div>
+                              <p className="text-[11px] text-[#A1A1AA] leading-relaxed">
+                                Check <span className="text-[#D4D4D8]">{STORE_OWNER_EMAIL}</span>{' '}
+                                (including Spam / All Mail) and click FormSubmit&apos;s one-time{' '}
+                                <span className="text-[#F3F2F0]">&ldquo;Activate Form&rdquo;</span>{' '}
+                                link if not yet activated.
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="border border-amber-500/35 bg-amber-950/20 p-3.5 space-y-3">
+                              <div className="flex items-start gap-2 text-xs text-amber-200">
+                                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                                <div className="space-y-1">
+                                  <p className="font-medium">{emailDispatch.message}</p>
+                                  {emailDispatch.errorDetail && (
+                                    <p className="text-[11px] text-amber-200/80 break-words">
+                                      Error: {emailDispatch.errorDetail}
+                                    </p>
+                                  )}
+                                  <p className="text-[11px] text-[#A1A1AA]">
+                                    Order #{confirmedOrder.orderId} is saved in Owner Admin. Check{' '}
+                                    {STORE_OWNER_EMAIL} (Spam / All Mail) for FormSubmit&apos;s
+                                    one-time &ldquo;Activate Form&rdquo; link, or send now via:
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap gap-2">
+                                <a
+                                  href={buildOrderMailtoHref(confirmedOrder)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#F3F2F0] text-[#0b0b10] hover:bg-[#E4E2DE] text-[11px] font-semibold uppercase tracking-[0.08em] transition-colors"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" />
+                                  <span>Open in Mail / Gmail App ({STORE_OWNER_EMAIL})</span>
+                                </a>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopySummary(confirmedOrder)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-2 border border-[#F3F2F0]/20 bg-[#0e0e14] text-[#F3F2F0] hover:border-[#8B7CA8] text-[11px] font-medium uppercase tracking-[0.08em] cursor-pointer transition-colors"
+                                >
+                                  {copiedSummary ? (
+                                    <>
+                                      <Check className="w-3.5 h-3.5 text-[#A796C9]" />
+                                      <span>Copied Summary</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-3.5 h-3.5 text-[#A796C9]" />
+                                      <span>Copy Order Summary</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>

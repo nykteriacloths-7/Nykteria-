@@ -1,8 +1,29 @@
 import { useState } from 'react';
-import { Lock, Plus, RotateCcw, Trash2, Upload, Check, KeyRound, FlaskConical } from 'lucide-react';
+import {
+  Lock,
+  Plus,
+  RotateCcw,
+  Trash2,
+  Upload,
+  Check,
+  KeyRound,
+  FlaskConical,
+  Eye,
+  EyeOff,
+  MailCheck,
+  AlertTriangle,
+  ExternalLink,
+  Copy,
+} from 'lucide-react';
 import { GarmentSize, OrderReservation, OrderStatus, Product } from '../types';
 import { formatInr, getEffectivePrice } from '../utils/pricing';
-import { sendOrderEmailViaFormSubmit, STORE_OWNER_EMAIL } from '../utils/orderEmail';
+import {
+  buildOrderMailtoHref,
+  buildOrderSummaryText,
+  EmailDispatchResult,
+  sendOrderEmailViaFormSubmit,
+  STORE_OWNER_EMAIL,
+} from '../utils/orderEmail';
 import { ResilientGarmentImage } from './ResilientGarmentImage';
 import { triggerHaptic } from '../utils/haptics';
 
@@ -32,16 +53,65 @@ const ORDER_STATUS_OPTIONS: OrderStatus[] = [
 const OWNER_EMAIL = (import.meta.env.VITE_OWNER_ADMIN_EMAIL || STORE_OWNER_EMAIL)
   .trim()
   .toLowerCase();
-const DEFAULT_OWNER_PASSWORD = import.meta.env.VITE_OWNER_ADMIN_PASSWORD || 'Nykteria@2026';
+const FALLBACK_OWNER_PASSWORD = (import.meta.env.VITE_OWNER_ADMIN_PASSWORD || 'Nykteria@2026').trim();
 const PASSWORD_OVERRIDE_KEY = 'nykteria_owner_password_v1';
+
+function hasCustomOwnerPassword(): boolean {
+  try {
+    const custom = window.localStorage.getItem(PASSWORD_OVERRIDE_KEY);
+    return Boolean(custom && custom.trim().length >= 6);
+  } catch {
+    return false;
+  }
+}
 
 function getActiveOwnerPassword(): string {
   try {
     const custom = window.localStorage.getItem(PASSWORD_OVERRIDE_KEY);
-    return custom && custom.length >= 6 ? custom : DEFAULT_OWNER_PASSWORD;
+    return custom && custom.trim().length >= 6 ? custom.trim() : FALLBACK_OWNER_PASSWORD;
   } catch {
-    return DEFAULT_OWNER_PASSWORD;
+    return FALLBACK_OWNER_PASSWORD;
   }
+}
+
+function readUploadedImageAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Failed to read image file.'));
+    reader.onload = () => {
+      const rawDataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!rawDataUrl) {
+        reject(new Error('Invalid image data.'));
+        return;
+      }
+      // Keep small images untouched; scale large photos cleanly so localStorage persists reliably
+      if (file.size <= 450 * 1024) {
+        resolve(rawDataUrl);
+        return;
+      }
+      const img = new Image();
+      img.onerror = () => resolve(rawDataUrl);
+      img.onload = () => {
+        const maxDim = 1200;
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const targetW = Math.max(1, Math.round(img.width * scale));
+        const targetH = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          resolve(rawDataUrl);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, targetW, targetH);
+        const compressed = canvas.toDataURL('image/jpeg', 0.86);
+        resolve(compressed.length < rawDataUrl.length ? compressed : rawDataUrl);
+      };
+      img.src = rawDataUrl;
+    };
+    reader.readAsDataURL(file);
+  });
 }
 
 export function OwnerAdminPanel({
@@ -59,16 +129,33 @@ export function OwnerAdminPanel({
   const [unlocked, setUnlocked] = useState(false);
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
+  const [showPasswordText, setShowPasswordText] = useState(false);
   const [authError, setAuthError] = useState('');
+  const [authSuccess, setAuthSuccess] = useState('');
+  const [customPwActive, setCustomPwActive] = useState<boolean>(() => hasCustomOwnerPassword());
 
+  // Login screen "Forgot or Set Password" panel
+  const [showLoginReset, setShowLoginReset] = useState(false);
+  const [resetEmailInput, setResetEmailInput] = useState('');
+  const [resetNewPw, setResetNewPw] = useState('');
+  const [resetConfirmPw, setResetConfirmPw] = useState('');
+  const [resetError, setResetError] = useState('');
+
+  // Unlocked "Set / Change Password" panel
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [currentPwInput, setCurrentPwInput] = useState('');
   const [newPwInput, setNewPwInput] = useState('');
   const [pwChangeMessage, setPwChangeMessage] = useState('');
+  const [pwChangeIsError, setPwChangeIsError] = useState(false);
 
   const [activeTab, setActiveTab] = useState<AdminTab>('edit');
   const [statusNotice, setStatusNotice] = useState('');
   const [sendingTestOrder, setSendingTestOrder] = useState(false);
+  const [adminTestStatus, setAdminTestStatus] = useState<{
+    order: OrderReservation;
+    result: EmailDispatchResult;
+  } | null>(null);
+  const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null);
 
   // New Product Form State
   const [newName, setNewName] = useState('');
@@ -90,28 +177,33 @@ export function OwnerAdminPanel({
 
   const showFlash = (msg: string) => {
     setStatusNotice(msg);
-    window.setTimeout(() => setStatusNotice(''), 3400);
+    window.setTimeout(() => setStatusNotice(''), 4200);
   };
 
   const handleAuthSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedEmail = emailInput.trim().toLowerCase();
+    const candidatePw = passwordInput.trim();
+    const activePw = getActiveOwnerPassword();
 
-    if (!trimmedEmail || !passwordInput) {
+    if (!trimmedEmail || !candidatePw) {
       triggerHaptic('error');
       setAuthError('Enter your owner email and password.');
+      setAuthSuccess('');
       return;
     }
 
     if (trimmedEmail !== OWNER_EMAIL) {
       triggerHaptic('error');
-      setAuthError(`Invalid owner email. Access is restricted to ${OWNER_EMAIL}.`);
+      setAuthError('Invalid owner email or password.');
+      setAuthSuccess('');
       return;
     }
 
-    if (passwordInput !== getActiveOwnerPassword()) {
+    if (candidatePw !== activePw) {
       triggerHaptic('error');
-      setAuthError('Incorrect owner password.');
+      setAuthError('Invalid owner email or password.');
+      setAuthSuccess('');
       return;
     }
 
@@ -119,70 +211,205 @@ export function OwnerAdminPanel({
     setUnlocked(true);
     setPasswordInput('');
     setAuthError('');
+    setAuthSuccess('');
+    setShowLoginReset(false);
+  };
+
+  const handleLoginPasswordSetup = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedEmail = resetEmailInput.trim().toLowerCase();
+    const nextPw = resetNewPw.trim();
+    const confirmPw = resetConfirmPw.trim();
+
+    if (trimmedEmail !== OWNER_EMAIL) {
+      triggerHaptic('error');
+      setResetError('Owner email does not match the registered storefront account.');
+      return;
+    }
+    if (nextPw.length < 6) {
+      triggerHaptic('error');
+      setResetError('New password must be at least 6 characters.');
+      return;
+    }
+    if (nextPw !== confirmPw) {
+      triggerHaptic('error');
+      setResetError('Passwords do not match.');
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(PASSWORD_OVERRIDE_KEY, nextPw);
+    } catch {
+      setResetError('Unable to write password to browser storage.');
+      return;
+    }
+
+    triggerHaptic('select');
+    setCustomPwActive(true);
+    setResetError('');
+    setResetEmailInput('');
+    setResetNewPw('');
+    setResetConfirmPw('');
+    setShowLoginReset(false);
+    setAuthError('');
+    setPasswordInput('');
+    setAuthSuccess('New owner password saved in this browser. Sign in with your new password.');
+  };
+
+  const handleRestoreDefaultFromLogin = () => {
+    try {
+      window.localStorage.removeItem(PASSWORD_OVERRIDE_KEY);
+    } catch {
+      // Ignore storage error
+    }
+    triggerHaptic('select');
+    setCustomPwActive(false);
+    setResetError('');
+    setResetEmailInput('');
+    setResetNewPw('');
+    setResetConfirmPw('');
+    setShowLoginReset(false);
+    setAuthError('');
+    setPasswordInput('');
+    setAuthSuccess('Custom browser password cleared. Use your storefront owner password.');
   };
 
   const handleLockAdmin = () => {
     triggerHaptic('lock');
     setUnlocked(false);
+    setEmailInput('');
     setPasswordInput('');
     setAuthError('');
+    setAuthSuccess('');
     setShowChangePassword(false);
+    setShowLoginReset(false);
   };
 
   const handleChangePassword = (e: React.FormEvent) => {
     e.preventDefault();
-    if (currentPwInput !== getActiveOwnerPassword()) {
+    const activePw = getActiveOwnerPassword();
+    if (currentPwInput.trim() !== activePw) {
       triggerHaptic('error');
+      setPwChangeIsError(true);
       setPwChangeMessage('Current password is incorrect.');
       return;
     }
-    if (newPwInput.length < 6) {
+    const trimmedNew = newPwInput.trim();
+    if (trimmedNew.length < 6) {
       triggerHaptic('error');
+      setPwChangeIsError(true);
       setPwChangeMessage('New password must be at least 6 characters.');
       return;
     }
     try {
-      window.localStorage.setItem(PASSWORD_OVERRIDE_KEY, newPwInput);
+      window.localStorage.setItem(PASSWORD_OVERRIDE_KEY, trimmedNew);
     } catch {
-      // Ignore storage quota errors
+      setPwChangeIsError(true);
+      setPwChangeMessage('Could not save password to browser storage.');
+      return;
     }
     triggerHaptic('select');
+    setCustomPwActive(true);
     setCurrentPwInput('');
     setNewPwInput('');
-    setPwChangeMessage('');
-    setShowChangePassword(false);
-    showFlash('Owner password updated for this storefront.');
+    setPwChangeIsError(false);
+    setPwChangeMessage('New owner password saved.');
+    showFlash('New owner password saved for this storefront.');
+  };
+
+  const handleRestoreDefaultInsideAdmin = () => {
+    try {
+      window.localStorage.removeItem(PASSWORD_OVERRIDE_KEY);
+    } catch {
+      // Ignore storage errors
+    }
+    triggerHaptic('select');
+    setCustomPwActive(false);
+    setCurrentPwInput('');
+    setNewPwInput('');
+    setPwChangeIsError(false);
+    setPwChangeMessage('Custom browser password cleared.');
+    showFlash('Custom browser password cleared.');
+  };
+
+  const handleCopyOrder = async (order: OrderReservation) => {
+    const summary = buildOrderSummaryText(order);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(summary);
+      } else {
+        const el = document.createElement('textarea');
+        el.value = summary;
+        document.body.appendChild(el);
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+      }
+      triggerHaptic('tap');
+      setCopiedOrderId(order.orderId);
+      window.setTimeout(() => setCopiedOrderId((prev) => (prev === order.orderId ? null : prev)), 2500);
+    } catch {
+      // Ignore copy failures
+    }
   };
 
   const handleSendAdminTestOrder = async () => {
     if (sendingTestOrder) return;
     setSendingTestOrder(true);
+    setAdminTestStatus(null);
     const created = onCreateTestOrder();
     triggerHaptic('confirmOrder');
     const result = await sendOrderEmailViaFormSubmit(created);
     onUpdateOrderEmailStatus(created.orderId, result.delivered);
+    setAdminTestStatus({
+      order: { ...created, emailDelivered: result.delivered },
+      result,
+    });
     setSendingTestOrder(false);
     showFlash(
       result.delivered
-        ? `Test order #${created.orderId} saved & emailed to ${STORE_OWNER_EMAIL}.`
-        : `Test order #${created.orderId} saved locally (${result.message})`
+        ? `Test order #${created.orderId} sent to ${STORE_OWNER_EMAIL}.`
+        : `Test order #${created.orderId} saved locally — email fallback ready.`
     );
   };
 
-  const handleImageFileUpload = (
+  const handleImageFileUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
     target: 'front' | 'back'
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        if (target === 'front') setNewFrontImage(reader.result);
-        else setNewBackImage(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const dataUrl = await readUploadedImageAsDataUrl(file);
+      if (target === 'front') setNewFrontImage(dataUrl);
+      else setNewBackImage(dataUrl);
+      triggerHaptic('select');
+    } catch {
+      showFlash('Unable to process selected image file.');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleExistingProductImageUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    product: Product,
+    side: 'frontImage' | 'backImage'
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await readUploadedImageAsDataUrl(file);
+      onUpdateProduct(product.id, { [side]: dataUrl });
+      triggerHaptic('select');
+      showFlash(
+        `Updated ${side === 'frontImage' ? 'Front' : 'Back'} photo for ${product.shortName}.`
+      );
+    } catch {
+      showFlash('Unable to process selected image file.');
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const handleCreateProduct = (e: React.FormEvent) => {
@@ -270,15 +497,16 @@ export function OwnerAdminPanel({
       </div>
 
       {!unlocked ? (
-        <div className="py-8 sm:py-10 max-w-md">
-          <div className="flex items-center gap-2.5 text-sm text-[#F3F2F0] mb-2">
-            <Lock className="w-4 h-4 text-[#8B7CA8]" />
-            <span>Owner Email & Password Required</span>
+        <div className="py-8 sm:py-10 max-w-lg space-y-5">
+          <div>
+            <div className="flex items-center gap-2.5 text-sm text-[#F3F2F0] mb-2">
+              <Lock className="w-4 h-4 text-[#8B7CA8]" />
+              <span>Owner Email & Password Required</span>
+            </div>
+            <p className="text-xs text-[#A1A1AA] leading-relaxed">
+              Restricted storefront console for the registered NYKTERIA owner.
+            </p>
           </div>
-          <p className="text-xs text-[#A1A1AA] mb-5 leading-relaxed">
-            Restricted storefront console bound to your registered NYKTERIA owner email for
-            modifying active garment prices, launch offers, and reviewing orders.
-          </p>
 
           <form onSubmit={handleAuthSubmit} className="space-y-3">
             <div>
@@ -294,7 +522,7 @@ export function OwnerAdminPanel({
                   setEmailInput(e.target.value);
                   if (authError) setAuthError('');
                 }}
-                placeholder="Enter registered owner email"
+                placeholder="Enter owner email"
                 autoComplete="email"
                 className="w-full bg-[#15151d] border border-[#F3F2F0]/15 px-3.5 py-2.5 text-sm text-[#F3F2F0] placeholder:text-[#71717A] focus:outline-none focus:border-[#8B7CA8] min-h-[44px]"
               />
@@ -304,29 +532,151 @@ export function OwnerAdminPanel({
               <label htmlFor="nyx-owner-password" className="block text-xs text-[#A1A1AA] mb-1">
                 Password
               </label>
-              <input
-                id="nyx-owner-password"
-                type="password"
-                required
-                value={passwordInput}
-                onChange={(e) => {
-                  setPasswordInput(e.target.value);
-                  if (authError) setAuthError('');
-                }}
-                placeholder="Enter owner password"
-                autoComplete="current-password"
-                className="w-full bg-[#15151d] border border-[#F3F2F0]/15 px-3.5 py-2.5 text-sm text-[#F3F2F0] placeholder:text-[#71717A] focus:outline-none focus:border-[#8B7CA8] min-h-[44px]"
-              />
+              <div className="relative">
+                <input
+                  id="nyx-owner-password"
+                  type={showPasswordText ? 'text' : 'password'}
+                  required
+                  value={passwordInput}
+                  onChange={(e) => {
+                    setPasswordInput(e.target.value);
+                    if (authError) setAuthError('');
+                  }}
+                  placeholder="Enter owner password"
+                  autoComplete="current-password"
+                  className="w-full bg-[#15151d] border border-[#F3F2F0]/15 pl-3.5 pr-11 py-2.5 text-sm text-[#F3F2F0] placeholder:text-[#71717A] focus:outline-none focus:border-[#8B7CA8] min-h-[44px]"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordText((v) => !v)}
+                  aria-label={showPasswordText ? 'Hide password' : 'Show password'}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 text-[#A1A1AA] hover:text-[#F3F2F0] cursor-pointer"
+                >
+                  {showPasswordText ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
             </div>
 
-            <button
-              type="submit"
-              className="px-5 py-2.5 bg-[#F3F2F0] text-[#0b0b10] hover:bg-[#E4E2DE] text-xs font-semibold tracking-[0.12em] uppercase cursor-pointer min-h-[44px] transition-colors"
-            >
-              Sign In & Unlock
-            </button>
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <button
+                type="submit"
+                className="px-5 py-2.5 bg-[#F3F2F0] text-[#0b0b10] hover:bg-[#E4E2DE] text-xs font-semibold tracking-[0.12em] uppercase cursor-pointer min-h-[44px] transition-colors whitespace-nowrap shrink-0"
+              >
+                Sign In & Unlock
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic('tap');
+                  setShowLoginReset((v) => !v);
+                  setResetError('');
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2.5 border border-[#8B7CA8]/40 bg-[#15151d] hover:border-[#A796C9] text-xs text-[#D4D4D8] hover:text-[#F3F2F0] cursor-pointer min-h-[44px] transition-colors"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-[#A796C9]" />
+                <span>
+                  {showLoginReset ? 'Close Password Setup' : 'Set / Reset Owner Password'}
+                </span>
+              </button>
+            </div>
           </form>
-          {authError && <p className="mt-3 text-xs text-red-400">{authError}</p>}
+
+          {authError && (
+            <p className="text-xs text-red-400 border border-red-500/30 bg-red-950/20 px-3.5 py-2.5">
+              {authError}
+            </p>
+          )}
+          {authSuccess && (
+            <p className="text-xs text-[#A796C9] border border-[#8B7CA8]/40 bg-[#15151d] px-3.5 py-2.5 flex items-center gap-2">
+              <Check className="w-3.5 h-3.5 shrink-0" />
+              <span>{authSuccess}</span>
+            </p>
+          )}
+
+          {showLoginReset && (
+            <form
+              onSubmit={handleLoginPasswordSetup}
+              className="border border-[#8B7CA8]/40 bg-[#15151d] p-4 sm:p-5 space-y-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[#F3F2F0]">
+                  Set or Reset Owner Password
+                </p>
+                {customPwActive && (
+                  <button
+                    type="button"
+                    onClick={handleRestoreDefaultFromLogin}
+                    className="text-[11px] text-[#A796C9] hover:text-[#F3F2F0] underline underline-offset-4 cursor-pointer"
+                  >
+                    Clear Browser Override
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-[#A1A1AA] leading-relaxed">
+                Verify your registered owner email to set a custom password for this browser.
+              </p>
+
+              <div>
+                <label htmlFor="nyx-reset-email" className="block text-[11px] text-[#A1A1AA] mb-1">
+                  Registered Owner Email
+                </label>
+                <input
+                  id="nyx-reset-email"
+                  type="email"
+                  required
+                  value={resetEmailInput}
+                  onChange={(e) => setResetEmailInput(e.target.value)}
+                  placeholder="Enter owner email"
+                  autoComplete="email"
+                  className="w-full bg-[#0f0f15] border border-[#F3F2F0]/15 px-3 py-2 text-sm text-[#F3F2F0] placeholder:text-[#71717A] focus:outline-none focus:border-[#8B7CA8]"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="nyx-reset-pw" className="block text-[11px] text-[#A1A1AA] mb-1">
+                    New Password (min 6 chars)
+                  </label>
+                  <input
+                    id="nyx-reset-pw"
+                    type="password"
+                    required
+                    value={resetNewPw}
+                    onChange={(e) => setResetNewPw(e.target.value)}
+                    placeholder="Enter new password"
+                    className="w-full bg-[#0f0f15] border border-[#F3F2F0]/15 px-3 py-2 text-sm text-[#F3F2F0] placeholder:text-[#71717A] focus:outline-none focus:border-[#8B7CA8]"
+                  />
+                </div>
+                <div>
+                  <label
+                    htmlFor="nyx-reset-pw-confirm"
+                    className="block text-[11px] text-[#A1A1AA] mb-1"
+                  >
+                    Confirm New Password
+                  </label>
+                  <input
+                    id="nyx-reset-pw-confirm"
+                    type="password"
+                    required
+                    value={resetConfirmPw}
+                    onChange={(e) => setResetConfirmPw(e.target.value)}
+                    placeholder="Re-enter password"
+                    className="w-full bg-[#0f0f15] border border-[#F3F2F0]/15 px-3 py-2 text-sm text-[#F3F2F0] placeholder:text-[#71717A] focus:outline-none focus:border-[#8B7CA8]"
+                  />
+                </div>
+              </div>
+
+              {resetError && <p className="text-xs text-red-400">{resetError}</p>}
+
+              <button
+                type="submit"
+                className="px-4 py-2.5 bg-[#F3F2F0] text-[#0b0b10] hover:bg-[#E4E2DE] text-xs font-semibold uppercase tracking-[0.12em] cursor-pointer min-h-[40px]"
+              >
+                Save New Password
+              </button>
+            </form>
+          )}
         </div>
       ) : (
         <div className="pt-6 space-y-6">
@@ -336,17 +686,22 @@ export function OwnerAdminPanel({
               <span className="text-[#8B7CA8] uppercase tracking-[0.12em]">Verified Owner</span>
               <span aria-hidden="true">·</span>
               <span className="font-mono-num text-[#F3F2F0]">{OWNER_EMAIL}</span>
+              <span aria-hidden="true">·</span>
+              <span className="text-[11px] text-[#A1A1AA]">
+                {customPwActive ? 'Custom Password Active' : 'Initial Password Active'}
+              </span>
             </div>
             <button
               type="button"
               onClick={() => {
                 setShowChangePassword((prev) => !prev);
                 setPwChangeMessage('');
+                setPwChangeIsError(false);
               }}
               className="inline-flex items-center gap-1.5 text-xs text-[#A796C9] hover:text-[#F3F2F0] cursor-pointer"
             >
               <KeyRound className="w-3.5 h-3.5" />
-              <span>{showChangePassword ? 'Cancel Password Edit' : 'Change Password'}</span>
+              <span>{showChangePassword ? 'Cancel Password Edit' : 'Set / Change Password'}</span>
             </button>
           </div>
 
@@ -362,6 +717,7 @@ export function OwnerAdminPanel({
                   required
                   value={currentPwInput}
                   onChange={(e) => setCurrentPwInput(e.target.value)}
+                  placeholder="Enter current password"
                   className="w-full bg-[#0f0f15] border border-[#F3F2F0]/15 px-3 py-2 text-sm text-[#F3F2F0]"
                 />
               </div>
@@ -376,14 +732,31 @@ export function OwnerAdminPanel({
                   className="w-full bg-[#0f0f15] border border-[#F3F2F0]/15 px-3 py-2 text-sm text-[#F3F2F0]"
                 />
               </div>
-              <button
-                type="submit"
-                className="px-4 py-2.5 bg-[#F3F2F0] text-[#0b0b10] text-xs font-semibold uppercase tracking-[0.1em] cursor-pointer min-h-[40px]"
-              >
-                Update Password
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  className="flex-1 px-4 py-2.5 bg-[#F3F2F0] text-[#0b0b10] text-xs font-semibold uppercase tracking-[0.1em] cursor-pointer min-h-[40px]"
+                >
+                  Save Password
+                </button>
+                {customPwActive && (
+                  <button
+                    type="button"
+                    onClick={handleRestoreDefaultInsideAdmin}
+                    className="px-3 py-2.5 border border-[#F3F2F0]/15 text-[11px] uppercase tracking-[0.08em] text-[#A1A1AA] hover:text-[#F3F2F0] cursor-pointer min-h-[40px]"
+                  >
+                    Clear Override
+                  </button>
+                )}
+              </div>
               {pwChangeMessage && (
-                <p className="sm:col-span-3 text-xs text-red-400">{pwChangeMessage}</p>
+                <p
+                  className={`sm:col-span-3 text-xs ${
+                    pwChangeIsError ? 'text-red-400' : 'text-[#A796C9]'
+                  }`}
+                >
+                  {pwChangeMessage}
+                </p>
               )}
             </form>
           )}
@@ -613,6 +986,96 @@ export function OwnerAdminPanel({
                         </div>
                       </div>
                     </div>
+
+                    {/* Front & Back Garment Photo Editor */}
+                    <div className="pt-4 border-t border-[#F3F2F0]/10 space-y-3">
+                      <span className="block text-xs uppercase tracking-[0.12em] text-[#8B7CA8]">
+                        Front & Back Garment Photos
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                        {/* Front Photo */}
+                        <div className="border border-[#F3F2F0]/10 bg-[#0b0b0f] p-3 space-y-2.5">
+                          <div className="flex items-center gap-3">
+                            <div className="w-11 aspect-[3/4] bg-[#070709] border border-[#F3F2F0]/10 overflow-hidden shrink-0">
+                              <ResilientGarmentImage
+                                src={item.frontImage}
+                                alt={`${item.shortName} Front`}
+                                title={item.shortName}
+                                viewLabel="Front"
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-[#F3F2F0]">
+                                Front Photo
+                              </p>
+                              <label className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-[#15151d] border border-[#F3F2F0]/20 text-[11px] text-[#F3F2F0] hover:border-[#8B7CA8] cursor-pointer">
+                                <Upload className="w-3 h-3 text-[#A796C9]" />
+                                <span>Upload File</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) =>
+                                    handleExistingProductImageUpload(e, item, 'frontImage')
+                                  }
+                                  className="sr-only"
+                                />
+                              </label>
+                            </div>
+                          </div>
+                          <input
+                            type="text"
+                            value={item.frontImage}
+                            onChange={(e) =>
+                              onUpdateProduct(item.id, { frontImage: e.target.value })
+                            }
+                            placeholder="Paste Front Image URL..."
+                            className="w-full bg-[#070709] border border-[#F3F2F0]/15 px-2.5 py-1.5 text-[11px] text-[#F3F2F0] placeholder:text-[#71717A] focus:outline-none focus:border-[#8B7CA8]"
+                          />
+                        </div>
+
+                        {/* Back Photo */}
+                        <div className="border border-[#F3F2F0]/10 bg-[#0b0b0f] p-3 space-y-2.5">
+                          <div className="flex items-center gap-3">
+                            <div className="w-11 aspect-[3/4] bg-[#070709] border border-[#F3F2F0]/10 overflow-hidden shrink-0">
+                              <ResilientGarmentImage
+                                src={item.backImage}
+                                alt={`${item.shortName} Back`}
+                                title={item.shortName}
+                                viewLabel="Back"
+                                className="w-full h-full object-cover"
+                              />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-[#F3F2F0]">
+                                Back Photo
+                              </p>
+                              <label className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-[#15151d] border border-[#F3F2F0]/20 text-[11px] text-[#F3F2F0] hover:border-[#8B7CA8] cursor-pointer">
+                                <Upload className="w-3 h-3 text-[#A796C9]" />
+                                <span>Upload File</span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={(e) =>
+                                    handleExistingProductImageUpload(e, item, 'backImage')
+                                  }
+                                  className="sr-only"
+                                />
+                              </label>
+                            </div>
+                          </div>
+                          <input
+                            type="text"
+                            value={item.backImage}
+                            onChange={(e) =>
+                              onUpdateProduct(item.id, { backImage: e.target.value })
+                            }
+                            placeholder="Paste Back Image URL..."
+                            className="w-full bg-[#070709] border border-[#F3F2F0]/15 px-2.5 py-1.5 text-[11px] text-[#F3F2F0] placeholder:text-[#71717A] focus:outline-none focus:border-[#8B7CA8]"
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 );
               })}
@@ -758,56 +1221,100 @@ export function OwnerAdminPanel({
                 </div>
               </div>
 
-              {/* Image URL or File Upload */}
+              {/* Image URL or File Upload + Live Previews */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="block text-xs text-[#A1A1AA]">
-                    Front Image (URL or Upload)
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newFrontImage}
-                      onChange={(e) => setNewFrontImage(e.target.value)}
-                      placeholder="Paste image URL or upload file..."
-                      className="flex-1 bg-[#070709] border border-[#F3F2F0]/15 px-3 py-2 text-xs text-[#F3F2F0] focus:outline-none focus:border-[#8B7CA8]"
-                    />
-                    <label className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#070709] border border-[#F3F2F0]/20 text-xs text-[#F3F2F0] hover:border-[#8B7CA8] cursor-pointer shrink-0">
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>Upload</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => handleImageFileUpload(e, 'front')}
-                        className="sr-only"
+                <div className="border border-[#F3F2F0]/10 bg-[#0b0b0f] p-3.5 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 aspect-[3/4] bg-[#070709] border border-[#F3F2F0]/10 overflow-hidden shrink-0">
+                      <ResilientGarmentImage
+                        src={newFrontImage}
+                        alt="New Front Preview"
+                        title={newName.trim() || 'Front'}
+                        viewLabel="Front"
+                        className="w-full h-full object-cover"
                       />
-                    </label>
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <label className="block text-xs text-[#F3F2F0] font-medium">
+                        Front Image (URL or Upload)
+                      </label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#15151d] border border-[#F3F2F0]/20 text-xs text-[#F3F2F0] hover:border-[#8B7CA8] cursor-pointer shrink-0">
+                          <Upload className="w-3.5 h-3.5 text-[#A796C9]" />
+                          <span>Upload</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => handleImageFileUpload(e, 'front')}
+                            className="sr-only"
+                          />
+                        </label>
+                        {newFrontImage && (
+                          <button
+                            type="button"
+                            onClick={() => setNewFrontImage('')}
+                            className="px-2.5 py-1.5 border border-[#F3F2F0]/15 text-[11px] text-[#A1A1AA] hover:text-[#F3F2F0] cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
+                  <input
+                    type="text"
+                    value={newFrontImage}
+                    onChange={(e) => setNewFrontImage(e.target.value)}
+                    placeholder="Paste front image URL or upload file..."
+                    className="w-full bg-[#070709] border border-[#F3F2F0]/15 px-3 py-2 text-xs text-[#F3F2F0] focus:outline-none focus:border-[#8B7CA8]"
+                  />
                 </div>
 
-                <div className="space-y-2">
-                  <label className="block text-xs text-[#A1A1AA]">
-                    Back Image (URL or Upload)
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newBackImage}
-                      onChange={(e) => setNewBackImage(e.target.value)}
-                      placeholder="Paste image URL or upload file..."
-                      className="flex-1 bg-[#070709] border border-[#F3F2F0]/15 px-3 py-2 text-xs text-[#F3F2F0] focus:outline-none focus:border-[#8B7CA8]"
-                    />
-                    <label className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#070709] border border-[#F3F2F0]/20 text-xs text-[#F3F2F0] hover:border-[#8B7CA8] cursor-pointer shrink-0">
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>Upload</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(e) => handleImageFileUpload(e, 'back')}
-                        className="sr-only"
+                <div className="border border-[#F3F2F0]/10 bg-[#0b0b0f] p-3.5 space-y-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 aspect-[3/4] bg-[#070709] border border-[#F3F2F0]/10 overflow-hidden shrink-0">
+                      <ResilientGarmentImage
+                        src={newBackImage || newFrontImage}
+                        alt="New Back Preview"
+                        title={newName.trim() || 'Back'}
+                        viewLabel="Back"
+                        className="w-full h-full object-cover"
                       />
-                    </label>
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-1.5">
+                      <label className="block text-xs text-[#F3F2F0] font-medium">
+                        Back Image (URL or Upload)
+                      </label>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#15151d] border border-[#F3F2F0]/20 text-xs text-[#F3F2F0] hover:border-[#8B7CA8] cursor-pointer shrink-0">
+                          <Upload className="w-3.5 h-3.5 text-[#A796C9]" />
+                          <span>Upload</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => handleImageFileUpload(e, 'back')}
+                            className="sr-only"
+                          />
+                        </label>
+                        {newBackImage && (
+                          <button
+                            type="button"
+                            onClick={() => setNewBackImage('')}
+                            className="px-2.5 py-1.5 border border-[#F3F2F0]/15 text-[11px] text-[#A1A1AA] hover:text-[#F3F2F0] cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
+                  <input
+                    type="text"
+                    value={newBackImage}
+                    onChange={(e) => setNewBackImage(e.target.value)}
+                    placeholder="Paste back image URL or upload file..."
+                    className="w-full bg-[#070709] border border-[#F3F2F0]/15 px-3 py-2 text-xs text-[#F3F2F0] focus:outline-none focus:border-[#8B7CA8]"
+                  />
                 </div>
               </div>
 
@@ -829,7 +1336,7 @@ export function OwnerAdminPanel({
                     Reservation Pipeline
                   </p>
                   <p className="text-xs text-[#A1A1AA] mt-0.5">
-                    Advance garment status live or generate a test allocation for QA verification.
+                    Advance garment status live or dispatch a live test order to {STORE_OWNER_EMAIL}.
                   </p>
                 </div>
                 <button
@@ -842,6 +1349,76 @@ export function OwnerAdminPanel({
                   <span>{sendingTestOrder ? 'Sending...' : 'Send Test Order'}</span>
                 </button>
               </div>
+
+              {adminTestStatus && (
+                <div
+                  className={`p-4 border space-y-2.5 ${
+                    adminTestStatus.result.delivered
+                      ? 'border-[#8B7CA8]/45 bg-[#0f0f15]'
+                      : 'border-amber-500/35 bg-amber-950/20'
+                  }`}
+                >
+                  {adminTestStatus.result.delivered ? (
+                    <>
+                      <div className="flex items-center gap-2 text-xs font-medium text-[#F3F2F0]">
+                        <MailCheck className="w-4 h-4 text-[#A796C9] shrink-0" />
+                        <span>
+                          Test Order #{adminTestStatus.order.orderId} sent to {STORE_OWNER_EMAIL}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-[#A1A1AA] leading-relaxed">
+                        Check <span className="text-[#D4D4D8]">{STORE_OWNER_EMAIL}</span>{' '}
+                        (including Spam / All Mail) and click FormSubmit&apos;s one-time{' '}
+                        <span className="text-[#F3F2F0]">&ldquo;Activate Form&rdquo;</span> link if
+                        not yet activated.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-start gap-2 text-xs text-amber-200">
+                        <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                          <p className="font-medium">
+                            Test Order #{adminTestStatus.order.orderId} saved locally —{' '}
+                            {adminTestStatus.result.message}
+                          </p>
+                          {adminTestStatus.result.errorDetail && (
+                            <p className="text-[11px] text-amber-200/80 break-words">
+                              Error: {adminTestStatus.result.errorDetail}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <a
+                          href={buildOrderMailtoHref(adminTestStatus.order)}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 bg-[#F3F2F0] text-[#0b0b10] hover:bg-[#E4E2DE] text-[11px] font-semibold uppercase tracking-[0.08em] transition-colors"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>Open in Mail / Gmail App ({STORE_OWNER_EMAIL})</span>
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyOrder(adminTestStatus.order)}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 border border-[#F3F2F0]/20 bg-[#0e0e14] text-[#F3F2F0] hover:border-[#8B7CA8] text-[11px] font-medium uppercase tracking-[0.08em] cursor-pointer transition-colors"
+                        >
+                          {copiedOrderId === adminTestStatus.order.orderId ? (
+                            <>
+                              <Check className="w-3.5 h-3.5 text-[#A796C9]" />
+                              <span>Copied Summary</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3.5 h-3.5 text-[#A796C9]" />
+                              <span>Copy Order Summary</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
 
               {orders.length === 0 ? (
                 <p className="text-sm text-[#A1A1AA] py-6 text-center">
@@ -875,29 +1452,58 @@ export function OwnerAdminPanel({
                         </span>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {ORDER_STATUS_OPTIONS.map((stage) => {
-                          const active = order.status === stage;
-                          return (
-                            <button
-                              key={stage}
-                              type="button"
-                              onClick={() => {
-                                triggerHaptic('select');
-                                onUpdateOrderStatus(order.orderId, stage);
-                                showFlash(`Order #${order.orderId} → ${stage}`);
-                              }}
-                              aria-pressed={active}
-                              className={`px-2.5 py-1.5 text-[11px] font-medium border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                                active
-                                  ? 'border-[#8B7CA8] bg-[#8B7CA8]/20 text-[#F3F2F0]'
-                                  : 'border-[#F3F2F0]/10 bg-[#0f0f15] text-[#A1A1AA] hover:text-[#F3F2F0]'
-                              }`}
-                            >
-                              {stage}
-                            </button>
-                          );
-                        })}
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {ORDER_STATUS_OPTIONS.map((stage) => {
+                            const active = order.status === stage;
+                            return (
+                              <button
+                                key={stage}
+                                type="button"
+                                onClick={() => {
+                                  triggerHaptic('select');
+                                  onUpdateOrderStatus(order.orderId, stage);
+                                  showFlash(`Order #${order.orderId} → ${stage}`);
+                                }}
+                                aria-pressed={active}
+                                className={`px-2.5 py-1.5 text-[11px] font-medium border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                                  active
+                                    ? 'border-[#8B7CA8] bg-[#8B7CA8]/20 text-[#F3F2F0]'
+                                    : 'border-[#F3F2F0]/10 bg-[#0f0f15] text-[#A1A1AA] hover:text-[#F3F2F0]'
+                                }`}
+                              >
+                                {stage}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <a
+                            href={buildOrderMailtoHref(order)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-[#F3F2F0]/15 bg-[#0f0f15] hover:border-[#8B7CA8] text-[11px] text-[#D4D4D8] hover:text-[#F3F2F0] whitespace-nowrap"
+                          >
+                            <ExternalLink className="w-3 h-3 text-[#A796C9]" />
+                            <span>Mail App</span>
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyOrder(order)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-[#F3F2F0]/15 bg-[#0f0f15] hover:border-[#8B7CA8] text-[11px] text-[#D4D4D8] hover:text-[#F3F2F0] whitespace-nowrap cursor-pointer"
+                          >
+                            {copiedOrderId === order.orderId ? (
+                              <>
+                                <Check className="w-3 h-3 text-[#A796C9]" />
+                                <span>Copied</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3 text-[#A796C9]" />
+                                <span>Copy</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
